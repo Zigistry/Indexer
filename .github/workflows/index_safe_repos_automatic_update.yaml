@@ -6,7 +6,7 @@ on:
     - cron: "30 4 * * *"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   run_index_safe_repos:
@@ -17,7 +17,6 @@ jobs:
       CB_API_KEY: ${{ secrets.CODEBERG_TOKEN }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       API_KEY: ${{ secrets.API_KEY }}
-      HF_TOKEN: ${{ secrets.HF_TOKEN }}
     steps:
       - name: repo
         uses: actions/checkout@v6
@@ -37,14 +36,13 @@ jobs:
           sleep 20
           curl http://127.0.0.1:8000/extract_keywords
 
-      - name: install hf
-        run: curl -LsSf https://hf.co/cli/install.sh | bash
-
       - name: Download index-safe-repos binary
         run: wget -O index-safe-repos https://github.com/Zigistry/database/releases/download/executables/index-safe-repos
 
       - name: Download database
-        run: wget -O ./zigistry.db https://huggingface.co/buckets/Zigistry/Zigistry/resolve/zigistry.db?download=true
+        run: |
+          wget -O ./database.db https://github.com/Zigistry/database/releases/download/database/database.db
+          ln -f ./database.db ./zigistry.db || cp ./database.db ./zigistry.db
 
       - name: Make binary executable
         run: chmod +x ./index-safe-repos
@@ -53,7 +51,11 @@ jobs:
         run: ./index-safe-repos
 
       - name: Run dependents calculator
-        run: sqlite3 ./zigistry.db < ./Database_SQL_Files/dependents_calculator.sql
+        run: sqlite3 ./database.db < ./Database_SQL_Files/dependents_calculator.sql
 
       - name: push updated database
-        run: hf cp ./zigistry.db hf://buckets/Zigistry/Zigistry/zigistry.db
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          [ -f ./database.db ] || cp ./zigistry.db ./database.db
+          gh release upload database ./database.db --clobber

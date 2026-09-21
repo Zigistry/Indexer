@@ -27,7 +27,12 @@ pub fn utc_now_timestamp() -> String {
 
 pub async fn connect_to_database() -> Result<Connection, Box<dyn std::error::Error>> {
     dotenv().ok();
-    let db = Builder::new_local("./zigistry.db");
+    let db_path = if std::path::Path::new("./database.db").exists() || !std::path::Path::new("./zigistry.db").exists() {
+        "./database.db"
+    } else {
+        "./zigistry.db"
+    };
+    let db = Builder::new_local(db_path);
     let client = db.build().await.unwrap();
     let pool = client.connect().unwrap();
     if START_FROM_SCRATCH {
