@@ -40,9 +40,7 @@ jobs:
         run: wget -O index-safe-repos https://github.com/Zigistry/database/releases/download/executables/index-safe-repos
 
       - name: Download database
-        run: |
-          wget -O ./database.db https://github.com/Zigistry/database/releases/download/database/database.db
-          ln -f ./database.db ./zigistry.db || cp ./database.db ./zigistry.db
+        run: wget -O ./zigistry.db https://github.com/Zigistry/database/releases/download/database/zigistry.db
 
       - name: Make binary executable
         run: chmod +x ./index-safe-repos
@@ -51,11 +49,9 @@ jobs:
         run: ./index-safe-repos
 
       - name: Run dependents calculator
-        run: sqlite3 ./database.db < ./Database_SQL_Files/dependents_calculator.sql
+        run: sqlite3 ./zigistry.db < ./Database_SQL_Files/dependents_calculator.sql
 
       - name: push updated database
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          [ -f ./database.db ] || cp ./zigistry.db ./database.db
-          gh release upload database ./database.db --clobber
+        run: gh release upload database ./zigistry.db --clobber

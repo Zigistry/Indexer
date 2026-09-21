@@ -39,9 +39,7 @@ jobs:
         run: wget -O cron-github https://github.com/Zigistry/database/releases/download/executables/cron-github
 
       - name: Download database
-        run: |
-          wget -O ./database.db https://github.com/Zigistry/database/releases/download/database/database.db
-          ln -f ./database.db ./zigistry.db || cp ./database.db ./zigistry.db
+        run: wget -O ./zigistry.db https://github.com/Zigistry/database/releases/download/database/zigistry.db
 
       - name: Make binary executable
         run: chmod +x ./cron-github
@@ -52,6 +50,4 @@ jobs:
       - name: push updated database
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          [ -f ./database.db ] || cp ./zigistry.db ./database.db
-          gh release upload database ./database.db --clobber
+        run: gh release upload database ./zigistry.db --clobber
