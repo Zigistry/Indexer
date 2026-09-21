@@ -1,0 +1,50 @@
+name: Process New Repos (Threat Detection)
+
+on:
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  process_new_repos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      CB_API_KEY: ${{ secrets.CODEBERG_TOKEN }}
+      GH_API_KEY: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Download the database
+        run: wget -O ./zigistry.db https://github.com/Zigistry/database/releases/download/database/zigistry.db
+
+      - name: Clone threat detection and prepare model
+        run: |
+          git clone https://github.com/Zigistry/threat-detection.git
+          cd threat-detection
+          uv sync
+          curl -L -o model.bin https://github.com/Zigistry/threat-detection/releases/download/threat-detection-model/model.bin
+
+      - name: Run process script
+        run: |
+          cd threat-detection
+          cp ../zigistry.db ./zigistry.db
+          uv run python src/process_and_add_new_repos.py
+          cp ./zigistry.db ../zigistry.db
+
+      - name: push updated database
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload database ./zigistry.db --clobber
+
