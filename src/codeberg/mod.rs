@@ -12,11 +12,24 @@ use crate::codeberg::helper_functions::{
 use crate::codeberg::types::types::Daum;
 use crate::constants::ASYNC_LIMIT;
 use crate::constants::limits;
-use crate::database::{parse_lazy_flag, truncate_to_char_limit, utc_now_timestamp};
+use crate::database::{parse_lazy_flag, truncate_option_to_char_limit, truncate_to_char_limit};
 use crate::{CODEBERG_KEY, codeberg::helper_functions::get_readme_url};
 use codeberg_process_release::fetch_releases;
 use futures::{stream, stream::StreamExt};
 use libsql::{Connection, Transaction, params};
+
+fn parse_iso_to_epoch(date_str: &str) -> i64 {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(date_str) {
+        return dt.timestamp();
+    }
+    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(date_str, "%Y-%m-%dT%H:%M:%SZ") {
+        return naive.and_utc().timestamp();
+    }
+    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(date_str, "%Y-%m-%d %H:%M:%S") {
+        return naive.and_utc().timestamp();
+    }
+    0
+}
 
 pub async fn get_repo_data(repository: Daum) -> RepoData {
     let user_id = format!("cb/{}", repository.owner.login).to_lowercase();
@@ -88,13 +101,13 @@ pub async fn send_repo_data_to_database(transaction: &Transaction, data: RepoDat
         readme_content,
         build_zig_zon_version,
         build_zig_zon_dependencies,
-        default_branch_directory_files,
+        default_branch_directory_files: _,
         releases,
     } = data;
 
     let repo_id = truncate_to_char_limit(&repo_id, limits::REPO_ID_MAX_LEN);
     let user_id = truncate_to_char_limit(&user_id, limits::USER_ID_MAX_LEN);
-    let platform = truncate_to_char_limit("codeberg", limits::PLATFORM_MAX_LEN);
+    let platform_id = "cb";
     let avatar_id = truncate_to_char_limit(
         repository
             .owner
@@ -122,32 +135,50 @@ pub async fn send_repo_data_to_database(transaction: &Transaction, data: RepoDat
     let license = truncate_to_char_limit("-", limits::REPO_LICENSE_MAX_LEN);
     let primary_language =
         truncate_to_char_limit(&repository.language, limits::REPO_PRIMARY_LANGUAGE_MAX_LEN);
-    let database_updated_at = utc_now_timestamp();
+    let database_updated_at = chrono::Utc::now().timestamp();
+    let pushed_at_epoch = parse_iso_to_epoch(&repository.updated_at);
+    let created_at_epoch = parse_iso_to_epoch(&repository.created_at);
     let is_package = repository.topics.iter().any(|topic| topic == "zig-package");
+
+    let latest_release = releases.iter().find(|r| !r.is_prerelease).or_else(|| releases.first());
+    let latest_release_version = latest_release.map(|r| {
+        truncate_to_char_limit(&r.tag_name, limits::RELEASE_VERSION_MAX_LEN)
+    });
+    let min_zig_ver_candidate = latest_release
+        .map(|r| r.minimum_zig_version.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(build_zig_zon_version.as_str());
+    let minimum_zig_version = if min_zig_ver_candidate.is_empty() {
+        None
+    } else {
+        Some(truncate_to_char_limit(min_zig_ver_candidate, limits::RELEASE_MIN_ZIG_VERSION_MAX_LEN))
+    };
+    let owner_avatar_id = Some(avatar_id.clone());
 
     let (user_insert_result, repo_insert_result) = tokio::join!(
         transaction.execute(
             r#"
             INSERT INTO users
-                (id, platform, avatar_id, bio)
+                (id, platform_id, avatar_id, bio)
             VALUES (?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
-                platform = excluded.platform,
+                platform_id = excluded.platform_id,
                 avatar_id = excluded.avatar_id,
                 bio = excluded.bio
             "#,
-            params![user_id.clone(), platform.clone(), avatar_id, user_bio],
+            params![user_id.clone(), platform_id, avatar_id, user_bio],
         ),
         transaction.execute(
             r#"
             INSERT INTO repos
-                (id, owner, platform, description, issues_count, default_branch_name, fork_count,
+                (id, owner, platform_id, description, issues_count, default_branch_name, fork_count,
                  stargazer_count, watchers_count, pushed_at, created_at, is_archived, is_disabled,
-                 is_fork, license, primary_language, latest_commit_hash, last_updated_in_this_database)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 is_fork, license, primary_language, latest_commit_hash, last_updated_in_this_database,
+                 is_package, is_program, latest_release_version, dependents_count, owner_avatar_id, minimum_zig_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 owner = excluded.owner,
-                platform = excluded.platform,
+                platform_id = excluded.platform_id,
                 description = excluded.description,
                 issues_count = excluded.issues_count,
                 default_branch_name = excluded.default_branch_name,
@@ -162,20 +193,26 @@ pub async fn send_repo_data_to_database(transaction: &Transaction, data: RepoDat
                 license = excluded.license,
                 primary_language = excluded.primary_language,
                 latest_commit_hash = excluded.latest_commit_hash,
-                last_updated_in_this_database = excluded.last_updated_in_this_database
+                last_updated_in_this_database = excluded.last_updated_in_this_database,
+                is_package = (excluded.is_package OR repos.is_package),
+                is_program = (excluded.is_program OR repos.is_program),
+                latest_release_version = COALESCE(excluded.latest_release_version, repos.latest_release_version),
+                dependents_count = repos.dependents_count,
+                owner_avatar_id = COALESCE(excluded.owner_avatar_id, repos.owner_avatar_id),
+                minimum_zig_version = COALESCE(excluded.minimum_zig_version, repos.minimum_zig_version)
             "#,
             params![
                 repo_id.clone(),
                 owner_id,
-                platform,
+                platform_id,
                 description,
                 repository.open_issues_count,
                 default_branch_name,
                 repository.forks_count,
                 repository.stars_count,
                 repository.watchers_count,
-                repository.updated_at.clone(),
-                repository.created_at.clone(),
+                pushed_at_epoch,
+                created_at_epoch,
                 repository.archived,
                 repository.archived,
                 repository.fork,
@@ -183,6 +220,12 @@ pub async fn send_repo_data_to_database(transaction: &Transaction, data: RepoDat
                 primary_language,
                 latest_commit_hash,
                 database_updated_at,
+                is_package,
+                !is_package,
+                latest_release_version,
+                0i64,
+                owner_avatar_id,
+                minimum_zig_version,
             ]
         ),
     );
@@ -231,188 +274,182 @@ pub async fn send_repo_data_to_database(transaction: &Transaction, data: RepoDat
             .unwrap();
     }
 
-    let mut rows = transaction
-        .query(
+    let default_branch_version = truncate_to_char_limit(
+        "__ZIGISTRY__DEFAULT__BRANCH__",
+        limits::RELEASE_VERSION_MAX_LEN,
+    );
+
+    transaction
+        .execute(
             r#"
-                INSERT INTO releases
-                    (repo_id, version, is_prerelease, published_at, minimum_zig_version, readme_url, directory_files)
-                VALUES(?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(repo_id, version) DO UPDATE SET
-                    is_prerelease = excluded.is_prerelease,
-                    published_at = excluded.published_at,
-                    minimum_zig_version = excluded.minimum_zig_version,
-                    readme_url = excluded.readme_url,
-                    directory_files = excluded.directory_files
-                RETURNING id
+            INSERT INTO releases
+                (repo_id, version, is_prerelease, published_at, minimum_zig_version, readme_url)
+            VALUES(?, ?, ?, ?, ?, ?)
+            ON CONFLICT(repo_id, version) DO UPDATE SET
+                is_prerelease = excluded.is_prerelease,
+                published_at = excluded.published_at,
+                minimum_zig_version = excluded.minimum_zig_version,
+                readme_url = excluded.readme_url
             "#,
             params![
                 repo_id.clone(),
-                truncate_to_char_limit(
-                    "__ZIGISTRY__DEFAULT__BRANCH__",
-                    limits::RELEASE_VERSION_MAX_LEN
-                ),
+                default_branch_version.clone(),
                 false,
-                repository.created_at.clone(),
-                truncate_to_char_limit(
-                    &build_zig_zon_version,
-                    limits::RELEASE_MIN_ZIG_VERSION_MAX_LEN
+                created_at_epoch,
+                truncate_option_to_char_limit(
+                    if build_zig_zon_version.is_empty() {
+                        None
+                    } else {
+                        Some(&build_zig_zon_version)
+                    },
+                    limits::RELEASE_MIN_ZIG_VERSION_MAX_LEN,
                 ),
                 readme_url,
-                truncate_to_char_limit(
-                    &default_branch_directory_files,
-                    limits::RELEASE_DIRECTORY_FILES_MAX_LEN
-                ),
             ],
         )
         .await
         .unwrap();
 
-    let default_branch_release_id: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
-
     transaction
         .execute(
-            "DELETE FROM release_dependencies WHERE release_id = ?",
-            params![default_branch_release_id],
+            "DELETE FROM release_dependencies WHERE repo_id = ? AND version = ?",
+            params![repo_id.clone(), default_branch_version.clone()],
         )
         .await
         .unwrap();
 
-    for dependency in build_zig_zon_dependencies {
+    if !build_zig_zon_dependencies.is_empty() {
+        let placeholders = build_zig_zon_dependencies
+            .iter()
+            .map(|_| "(?, ?, ?, ?, ?, ?, ?)")
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let sql = format!(
+            "INSERT INTO release_dependencies (repo_id, version, name, hash, is_lazy, url, path) VALUES {}",
+            placeholders
+        );
+
+        let mut params_vec: Vec<libsql::Value> = Vec::new();
+        for dependency in &build_zig_zon_dependencies {
+            params_vec.push(repo_id.clone().into());
+            params_vec.push(default_branch_version.clone().into());
+            params_vec.push(
+                truncate_to_char_limit(&dependency.name, limits::RELEASE_DEPENDENCY_FIELD_MAX_LEN)
+                    .into(),
+            );
+            params_vec.push(
+                truncate_to_char_limit(&dependency.hash, limits::RELEASE_DEPENDENCY_FIELD_MAX_LEN)
+                    .into(),
+            );
+            params_vec.push(i64::from(parse_lazy_flag(&dependency.lazy)).into());
+            params_vec.push(
+                truncate_to_char_limit(&dependency.url, limits::RELEASE_DEPENDENCY_FIELD_MAX_LEN)
+                    .into(),
+            );
+            params_vec.push(
+                truncate_to_char_limit(&dependency.path, limits::RELEASE_DEPENDENCY_FIELD_MAX_LEN)
+                    .into(),
+            );
+        }
+
+        transaction.execute(&sql, params_vec).await.unwrap();
+    }
+
+    for r in releases {
+        let release_version =
+            truncate_to_char_limit(&r.tag_name, limits::RELEASE_VERSION_MAX_LEN);
+        let release_published_at_epoch = parse_iso_to_epoch(&r.published_at);
+
         transaction
             .execute(
                 r#"
-                    INSERT INTO release_dependencies
-                        (release_id, name, hash, is_lazy, url, path)
-                    VALUES(?, ?, ?, ?, ?, ?)
-                "#,
-                params![
-                    default_branch_release_id,
-                    truncate_to_char_limit(
-                        &dependency.name,
-                        limits::RELEASE_DEPENDENCY_FIELD_MAX_LEN
-                    ),
-                    truncate_to_char_limit(
-                        &dependency.hash,
-                        limits::RELEASE_DEPENDENCY_FIELD_MAX_LEN
-                    ),
-                    i64::from(parse_lazy_flag(&dependency.lazy)),
-                    truncate_to_char_limit(
-                        &dependency.url,
-                        limits::RELEASE_DEPENDENCY_FIELD_MAX_LEN
-                    ),
-                    truncate_to_char_limit(
-                        &dependency.path,
-                        limits::RELEASE_DEPENDENCY_FIELD_MAX_LEN
-                    ),
-                ],
-            )
-            .await
-            .unwrap();
-    }
-
-    // Perist releases
-    for r in releases {
-        let mut rows = transaction
-            .query(
-                r#"
                 INSERT INTO releases
-                    (repo_id, version, is_prerelease, published_at, minimum_zig_version, readme_url, directory_files)
-                VALUES(?, ?, ?, ?, ?, ?, ?)
+                    (repo_id, version, is_prerelease, published_at, minimum_zig_version, readme_url)
+                VALUES(?, ?, ?, ?, ?, ?)
                 ON CONFLICT(repo_id, version) DO UPDATE SET
                     is_prerelease = excluded.is_prerelease,
                     published_at = excluded.published_at,
                     minimum_zig_version = excluded.minimum_zig_version,
-                    readme_url = excluded.readme_url,
-                    directory_files = excluded.directory_files
-                RETURNING id
-            "#,
+                    readme_url = excluded.readme_url
+                "#,
                 params![
                     repo_id.clone(),
-                    truncate_to_char_limit(&r.tag_name, limits::RELEASE_VERSION_MAX_LEN),
+                    release_version.clone(),
                     r.is_prerelease,
-                    r.published_at,
-                    truncate_to_char_limit(
-                        &r.minimum_zig_version,
-                        limits::RELEASE_MIN_ZIG_VERSION_MAX_LEN
+                    release_published_at_epoch,
+                    truncate_option_to_char_limit(
+                        if r.minimum_zig_version.is_empty() {
+                            None
+                        } else {
+                            Some(&r.minimum_zig_version)
+                        },
+                        limits::RELEASE_MIN_ZIG_VERSION_MAX_LEN,
                     ),
                     r.readme_url,
-                    truncate_to_char_limit(
-                        &r.directory_files,
-                        limits::RELEASE_DIRECTORY_FILES_MAX_LEN
-                    ),
                 ],
             )
             .await
             .unwrap();
 
-        let this_specific_release_id: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
-
         transaction
             .execute(
-                "DELETE FROM release_dependencies WHERE release_id = ?",
-                params![this_specific_release_id],
+                "DELETE FROM release_dependencies WHERE repo_id = ? AND version = ?",
+                params![repo_id.clone(), release_version.clone()],
             )
             .await
             .unwrap();
 
-        for dependency in r.dependencies {
-            transaction
-                .execute(
-                    r#"
-                        INSERT INTO release_dependencies
-                            (release_id, name, hash, is_lazy, url, path)
-                        VALUES(?, ?, ?, ?, ?, ?)
-                    "#,
-                    params![
-                        this_specific_release_id,
-                        truncate_to_char_limit(
-                            &dependency.name,
-                            limits::RELEASE_DEPENDENCY_FIELD_MAX_LEN
-                        ),
-                        truncate_to_char_limit(
-                            &dependency.hash,
-                            limits::RELEASE_DEPENDENCY_FIELD_MAX_LEN
-                        ),
-                        i64::from(parse_lazy_flag(&dependency.lazy)),
-                        truncate_to_char_limit(
-                            &dependency.url,
-                            limits::RELEASE_DEPENDENCY_FIELD_MAX_LEN
-                        ),
-                        truncate_to_char_limit(
-                            &dependency.path,
-                            limits::RELEASE_DEPENDENCY_FIELD_MAX_LEN
-                        ),
-                    ],
-                )
-                .await
-                .unwrap();
+        if !r.dependencies.is_empty() {
+            let placeholders = r
+                .dependencies
+                .iter()
+                .map(|_| "(?, ?, ?, ?, ?, ?, ?)")
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            let sql = format!(
+                "INSERT INTO release_dependencies (repo_id, version, name, hash, is_lazy, url, path) VALUES {}",
+                placeholders
+            );
+
+            let mut params_vec: Vec<libsql::Value> = Vec::new();
+            for dependency in &r.dependencies {
+                params_vec.push(repo_id.clone().into());
+                params_vec.push(release_version.clone().into());
+                params_vec.push(
+                    truncate_to_char_limit(
+                        &dependency.name,
+                        limits::RELEASE_DEPENDENCY_FIELD_MAX_LEN,
+                    )
+                    .into(),
+                );
+                params_vec.push(
+                    truncate_to_char_limit(
+                        &dependency.hash,
+                        limits::RELEASE_DEPENDENCY_FIELD_MAX_LEN,
+                    )
+                    .into(),
+                );
+                params_vec.push(i64::from(parse_lazy_flag(&dependency.lazy)).into());
+                params_vec.push(
+                    truncate_to_char_limit(
+                        &dependency.url,
+                        limits::RELEASE_DEPENDENCY_FIELD_MAX_LEN,
+                    )
+                    .into(),
+                );
+                params_vec.push(
+                    truncate_to_char_limit(
+                        &dependency.path,
+                        limits::RELEASE_DEPENDENCY_FIELD_MAX_LEN,
+                    )
+                    .into(),
+                );
+            }
+
+            transaction.execute(&sql, params_vec).await.unwrap();
         }
-    }
-
-    if is_package {
-        transaction
-            .execute(
-                r#"
-                    INSERT OR IGNORE INTO packages
-                        (repo_id)
-                    VALUES(?)
-                "#,
-                params![repo_id.clone()],
-            )
-            .await
-            .unwrap();
-    } else {
-        transaction
-            .execute(
-                r#"
-                    INSERT OR IGNORE INTO programs
-                        (repo_id)
-                    VALUES(?)
-                "#,
-                params![repo_id.clone()],
-            )
-            .await
-            .unwrap();
     }
 }
 
@@ -657,10 +694,17 @@ pub async fn fetch_all_codeberg_repos_cron_updating_part(
                     if let Ok(Some(row)) = existing_rows.next().await {
                         if let Ok(existing_commit_hash) = row.get::<String>(0) {
                             if existing_commit_hash != latest_commit_hash {
+                                let now_epoch = chrono::Utc::now().timestamp();
                                 if let Err(e) = transaction
                                     .execute(
-                                        "INSERT OR IGNORE INTO needs_updates (id, type_of_repo) VALUES (?, ?)",
-                                        params![repo_id.clone(), repo_type],
+                                        r#"
+                                        INSERT INTO repo_pipeline_queue (id, type_of_repo, status, queued_at)
+                                        VALUES (?, ?, 'needs_update', ?)
+                                        ON CONFLICT(id) DO UPDATE SET
+                                            status = 'needs_update',
+                                            queued_at = excluded.queued_at
+                                        "#,
+                                        params![repo_id.clone(), repo_type, now_epoch],
                                     )
                                     .await
                                 {
@@ -673,7 +717,7 @@ pub async fn fetch_all_codeberg_repos_cron_updating_part(
 
                     let banned_repos = transaction
                         .query(
-                            "SELECT 1 FROM banned_user_list WHERE id IN (?, ?) LIMIT 1",
+                            "SELECT 1 FROM banned_users WHERE id IN (?, ?) LIMIT 1",
                             params![format!("cb/{}", repository.owner.login).to_lowercase(), repository.owner.login.to_lowercase()],
                         )
                         .await;
@@ -690,10 +734,15 @@ pub async fn fetch_all_codeberg_repos_cron_updating_part(
                         return;
                     }
 
+                    let now_epoch = chrono::Utc::now().timestamp();
                     if let Err(e) = transaction
                         .execute(
-                            "INSERT OR IGNORE INTO index_new_repo (id, type_of_repo) VALUES (?, ?)",
-                            params![repo_id.clone(), repo_type],
+                            r#"
+                            INSERT INTO repo_pipeline_queue (id, type_of_repo, status, queued_at)
+                            VALUES (?, ?, 'pending_check', ?)
+                            ON CONFLICT(id) DO NOTHING
+                            "#,
+                            params![repo_id.clone(), repo_type, now_epoch],
                         )
                         .await
                     {
@@ -720,7 +769,7 @@ pub async fn run_cron_update_once(pool: Arc<Connection>) -> Result<(), Box<dyn s
     let client = reqwest::Client::new();
     let mut rows = pool
         .query(
-            "SELECT id FROM needs_updates WHERE id LIKE 'cb/%'",
+            "SELECT id FROM repo_pipeline_queue WHERE id LIKE 'cb/%' AND status = 'needs_update' ORDER BY queued_at",
             params![],
         )
         .await
@@ -773,8 +822,12 @@ pub async fn run_cron_update_once(pool: Arc<Connection>) -> Result<(), Box<dyn s
                     let repo_data = get_repo_data(daum).await;
                     let transaction = pool.transaction().await.unwrap();
                     send_repo_data_to_database(&transaction, repo_data).await;
+                    let now_epoch = chrono::Utc::now().timestamp();
                     transaction
-                        .execute("DELETE FROM needs_updates WHERE id = ?", params![id])
+                        .execute(
+                            "UPDATE repo_pipeline_queue SET status = 'indexed', processed_at = ? WHERE id = ?",
+                            params![now_epoch, id],
+                        )
                         .await
                         .unwrap();
                     transaction.commit().await.unwrap();
