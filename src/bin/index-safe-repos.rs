@@ -76,7 +76,12 @@ async fn process_github_repo(
     println!("{json_text}");
 
     let json: serde_json::Value = serde_json::from_str(&json_text).unwrap();
-    let data = json.get("data").and_then(|v| v.as_object()).unwrap();
+    let Some(data) = json.get("data").and_then(|v| v.as_object()) else {
+        eprintln!(
+            "GitHub GQL error or data is missing for the {owner_name}/{repo_name} repo \nJSON DATA:\n{json_text}"
+        );
+        return;
+    };
 
     let val = &data["repository"];
 
@@ -94,7 +99,7 @@ async fn process_github_repo(
         return;
     }
     let repo_data =
-        zigistry::github::get_repo_data(&repo_node, type_of_repo == "package", client).await;
+        zigistry::github::get_repo_data(&repo_node, type_of_repo.eq_ignore_ascii_case("package"), client).await;
 
     zigistry::github::persist_repo_data(&transaction, repo_data).await;
 
@@ -110,7 +115,7 @@ async fn main() {
 
     let mut rows_to_process = transaction
         .query(
-            "SELECT id, type_of_repo FROM safe_to_index_new_repo",
+            "SELECT id, type_of_repo FROM repo_pipeline_queue WHERE status = 'safe' ORDER BY queued_at",
             params![],
         )
         .await
@@ -145,10 +150,11 @@ async fn main() {
             panic!("got an unknown platform. {}", id)
         }
 
+        let now_epoch = chrono::Utc::now().timestamp();
         transaction
             .execute(
-                "DELETE FROM safe_to_index_new_repo where id = ?",
-                params![id.clone()],
+                "UPDATE repo_pipeline_queue SET status = 'indexed', processed_at = ? WHERE id = ?",
+                params![now_epoch, id],
             )
             .await
             .unwrap();

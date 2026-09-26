@@ -2,7 +2,6 @@ use super::types::Node;
 use crate::GITHUB_KEY;
 use crate::constants::{GH_GRAPH_QL_100_REPOS_FRAGMENT, NEEDS_UPDATE_CHUNK_SIZE};
 use libsql::{Connection, params};
-use reqwest::Client;
 use std::error::Error;
 use std::sync::Arc;
 
@@ -92,7 +91,7 @@ async fn make_update_rows_easy(
 ) -> Result<Vec<NeedsUpdateRow>, Box<dyn Error + Send + Sync>> {
     let mut rows = connection
         .query(
-            "SELECT id, type_of_repo FROM needs_updates ORDER BY id",
+            "SELECT id, type_of_repo FROM repo_pipeline_queue WHERE id LIKE 'gh/%' AND status = 'needs_update' ORDER BY queued_at",
             params![],
         )
         .await?;
@@ -145,16 +144,25 @@ async fn process_chunk(
     };
 
     let mut collected = Vec::new();
+    let mut skipped_or_invalid_ids = Vec::new();
+
     for (repo_idx, row) in chunk.iter().enumerate() {
         if parse_github_repo_id(&row.id).is_none() {
+            skipped_or_invalid_ids.push(row.id.clone());
             continue;
         }
 
         let alias = format!("repo_{repo_idx}");
         let Some(repo_value) = data_obj.get(&alias) else {
+            skipped_or_invalid_ids.push(row.id.clone());
             continue;
         };
         if repo_value.is_null() {
+            eprintln!(
+                "no repo data/update for: {}",
+                row.id
+            );
+            skipped_or_invalid_ids.push(row.id.clone());
             continue;
         }
 
@@ -162,6 +170,7 @@ async fn process_chunk(
             Ok(node) => node,
             Err(error) => {
                 eprintln!("Skipping {} because parse failed: {}", row.id, error);
+                skipped_or_invalid_ids.push(row.id.clone());
                 continue;
             }
         };
@@ -171,15 +180,27 @@ async fn process_chunk(
         collected.push((row.id.clone(), data));
     }
 
-    if collected.is_empty() {
+    if collected.is_empty() && skipped_or_invalid_ids.is_empty() {
         return Ok(());
     }
 
     let transaction = connection.transaction().await?;
+    let now_epoch = chrono::Utc::now().timestamp();
     for (repo_id, data) in collected {
         super::persist_repo_data(&transaction, data).await;
         transaction
-            .execute("DELETE FROM needs_updates WHERE id = ?", params![repo_id])
+            .execute(
+                "UPDATE repo_pipeline_queue SET status = 'indexed', processed_at = ? WHERE id = ?",
+                params![now_epoch, repo_id],
+            )
+            .await?;
+    }
+    for repo_id in skipped_or_invalid_ids {
+        transaction
+            .execute(
+                "UPDATE repo_pipeline_queue SET status = 'indexed', processed_at = ? WHERE id = ?",
+                params![now_epoch, repo_id],
+            )
             .await?;
     }
     transaction.commit().await?;
@@ -199,7 +220,7 @@ pub async fn run_cron_update_once(pool: Arc<Connection>) -> Result<(), Box<dyn E
             }
         }
         Err(error) => {
-            eprintln!("failed to read needs_updates: {error}");
+            eprintln!("failed to read repo_pipeline_queue: {error}");
         }
     }
 
