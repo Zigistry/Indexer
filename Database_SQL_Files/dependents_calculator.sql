@@ -12,10 +12,9 @@ WITH
           ''
         )
       ) AS url,
-      r.repo_id AS dependent
+      rd.repo_id AS dependent
     FROM
       release_dependencies rd
-      JOIN releases r ON r.id = rd.release_id
   ),
   cleaned AS (
     SELECT
@@ -100,7 +99,7 @@ WITH
       instr(path_after_domain, '/') > 0 -- Must have at least owner/repo
   )
 INSERT OR IGNORE INTO
-  repo_dependents (repo_id, dependent)
+  repo_dependents (repo_id, dependent_repo_id)
 SELECT DISTINCT
   lower(repo_id_of_dependency),
   lower(dependent)
@@ -116,3 +115,10 @@ WHERE
     WHERE
       lower(r.id) = lower(repo_id_of_dependency)
   );
+
+UPDATE repos
+SET dependents_count = (
+  SELECT count(*)
+  FROM repo_dependents
+  WHERE repo_dependents.repo_id = repos.id
+);

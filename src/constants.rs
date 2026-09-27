@@ -14,7 +14,7 @@ pub const NEEDS_UPDATE_CHUNK_SIZE: usize = 50;
 pub mod limits {
     pub const USER_ID_MAX_LEN: usize = 45;
     pub const USER_AVATAR_ID_MAX_LEN: usize = 65;
-    pub const PLATFORM_MAX_LEN: usize = 10;
+    pub const PLATFORM_MAX_LEN: usize = 2;
     pub const USER_BIO_MAX_LEN: usize = 260;
     pub const REPO_ID_MAX_LEN: usize = 150;
     pub const REPO_OWNER_MAX_LEN: usize = 45;
@@ -24,10 +24,10 @@ pub mod limits {
     pub const REPO_PRIMARY_LANGUAGE_MAX_LEN: usize = 50;
     pub const REPO_COMMIT_HASH_MAX_LEN: usize = 40;
     pub const TOPIC_MAX_LEN: usize = 60;
-    pub const DEPENDENT_MAX_LEN: usize = 260;
+    pub const DEPENDENT_MAX_LEN: usize = 150;
     pub const RELEASE_VERSION_MAX_LEN: usize = 255;
     pub const RELEASE_MIN_ZIG_VERSION_MAX_LEN: usize = 30;
     pub const RELEASE_DEPENDENCY_FIELD_MAX_LEN: usize = 260;
-    pub const INDEX_SECTION_NAME_MAX_LEN: usize = 10;
+    pub const INDEX_SECTION_NAME_MAX_LEN: usize = 20;
     pub const RELEASE_DIRECTORY_FILES_MAX_LEN: usize = 5000;
 }

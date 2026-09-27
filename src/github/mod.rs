@@ -208,19 +208,13 @@ pub async fn get_repo_data(
         default_branch_name.as_ref()
     };
 
-    let (build_zig_zon_data, (readme_url, readme_content), default_branch_directory_files) = tokio::join!(
+    let (build_zig_zon_data, (readme_url, readme_content)) = tokio::join!(
         get_build_zig_zon_data_wrapper(&repository.owner.login, &repository.name, branch, client),
         get_readme_url_and_content(
             &repository.owner.login,
             &repository.name,
             branch,
             true,
-            client
-        ),
-        fetch_root_folder_directory_files_wrapper(
-            &repository.owner.login,
-            &repository.name,
-            branch,
             client
         ),
     );
@@ -239,7 +233,7 @@ pub async fn get_repo_data(
         let release_clone = release.clone();
 
         async move {
-            let ((readme_url, _), bzz_results, directory_files) = tokio::join!(
+            let ((readme_url, _), bzz_results) = tokio::join!(
                 async {
                     match get_readme_url_and_content(&owner, &name, &tag, false, client).await {
                         (Some(url), _) => (url, String::new()),
@@ -247,7 +241,6 @@ pub async fn get_repo_data(
                     }
                 },
                 get_build_zig_zon_data_wrapper(&owner, &name, &tag, client),
-                fetch_root_folder_directory_files_wrapper(&owner, &name, &tag, client),
             );
 
             ReleaseData {
@@ -256,7 +249,6 @@ pub async fn get_repo_data(
                 published_at: release_clone.published_at,
                 minimum_zig_version: bzz_results.0,
                 readme_url,
-                directory_files,
                 dependencies: bzz_results.1,
             }
         }
@@ -281,7 +273,6 @@ pub async fn get_repo_data(
         readme_content: readme_processed_content,
         build_zig_zon_version: build_zig_zon_data.0,
         build_zig_zon_dependencies: build_zig_zon_data.1,
-        default_branch_directory_files,
         releases,
     }
 }
@@ -296,7 +287,6 @@ pub async fn persist_repo_data(transaction: &Transaction, data: RepoData) {
         readme_content,
         build_zig_zon_version,
         build_zig_zon_dependencies,
-        default_branch_directory_files: _,
         releases,
     } = data;
 
@@ -1137,24 +1127,6 @@ async fn get_build_zig_zon_data_wrapper(
     }
 }
 
-async fn fetch_root_folder_directory_files_wrapper(
-    owner_name: &str,
-    repo_name: &str,
-    branch_or_tag: &str,
-    client: &reqwest::Client,
-) -> String {
-    match cron_update_helper::fetch_root_folder_directory_files(
-        client,
-        owner_name.to_string(),
-        repo_name.to_string(),
-        branch_or_tag.to_string(),
-    )
-    .await
-    {
-        Ok(files) => files,
-        Err(_) => String::new(),
-    }
-}
 
 /// I have added this new client, which is much more optimized
 /// becuase, initially, I wasn't adding any timeouts.
