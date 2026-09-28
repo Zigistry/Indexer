@@ -36,10 +36,10 @@ jobs:
           curl http://127.0.0.1:8000/extract_keywords
 
       - name: Download cron-github binary
-        run: wget -O cron-github https://github.com/Zigistry/database/releases/download/executables/cron-github
+        run: wget -O cron-github https://github.com/Zigistry/indexer/releases/download/executables/cron-github
 
       - name: Download database
-        run: wget -O ./zigistry.db https://github.com/Zigistry/database/releases/download/database/zigistry.db
+        run: wget -O ./zigistry.db https://github.com/Zigistry/indexer/releases/download/database/zigistry.db
 
       - name: Make binary executable
         run: chmod +x ./cron-github

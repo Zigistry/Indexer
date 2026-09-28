@@ -27,7 +27,7 @@ jobs:
         run: uv python install 3.10
 
       - name: Download the database
-        run: wget -O ./zigistry.db https://github.com/Zigistry/database/releases/download/database/zigistry.db
+        run: wget -O ./zigistry.db https://github.com/Zigistry/indexer/releases/download/database/zigistry.db
 
       - name: Clone threat detection and prepare model
         run: |

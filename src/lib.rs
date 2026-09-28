@@ -4,7 +4,7 @@
  * Copyright (c) 2025 Rohan Vashisht
  *
  * This software is licensed under the GNU Affero General Public License v3.0.
- * The database content under `zigistry/database` is subject to additional terms.
+ * The database content under `zigistry/indexer` is subject to additional terms.
  *
  *      ______       _     _
  *     |__  (_) __ _(_)___| |_ _ __ _   _
