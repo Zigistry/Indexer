@@ -1,4 +1,3 @@
-/target
 schema.docs.graphql
 search_preparer
 *.json
@@ -7,3 +6,5 @@ search_preparer
 .env
 *.db*
 *.out
+build/
+libs/
