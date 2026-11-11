@@ -1,10 +1,11 @@
 #define CPPHTTPLIB_OPENSSL_SUPPORT
-#include "libs/httplib.h"
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
 #include <format>
+#include <httplib.h>
 #include <iostream>
+#include <json.hpp>
 
 // Using python as topic because
 // it has been around since 2008
@@ -18,11 +19,10 @@ uint64_t get_repo_count(const time_t low, const time_t high,
 {
     const std::string query = R"""(
 
-            query($search_query: String!, $cursor: String) {
+            query($search_query: String!) {
                 search(
                     query: $search_query,
                     type: REPOSITORY,
-                    first: 100,
                 ) {
                     repositoryCount
                 }
@@ -37,6 +37,23 @@ uint64_t get_repo_count(const time_t low, const time_t high,
     std::strftime(high_date, sizeof(high_date), "%Y-%m-%d", std::gmtime(&high));
 
     const std::string& search_query = std::format("topic:{} created:{}..{}", repo_topic, low_date, high_date);
+
+    httplib::Client cli("https://api.github.com");
+    const auto response = cli.Post("/graphql",
+        httplib::Headers {
+            { "Authorization", "Bearer " + github_token },
+            { "Accept", "application/vnd.github+json" },
+            { "User-Agent", "Zigistry-Indexer" },
+        },
+        nlohmann::json {
+            { "query", query },
+            {
+                "variables",
+                { { "search_query", query } },
+            },
+        }
+            .dump(),
+        "application/json");
 }
 
 std::vector<std::pair<time_t, time_t>> generate_range(const time_t low,
@@ -110,9 +127,9 @@ int main()
     std::vector<std::pair<time_t, time_t>> ranges;
 
     for (time_t i = starting_time; i < current_time; i += SECONDS_IN_MONTHS) {
-        time_t low = i;
-        time_t high = i + SECONDS_IN_MONTHS;
-        auto res = generate_range(low, high);
+        const time_t low = i;
+        const time_t high = i + SECONDS_IN_MONTHS;
+        const auto res = generate_range(low, high);
         ranges.insert(ranges.end(), res.begin(), res.end());
     }
 
