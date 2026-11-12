@@ -55,6 +55,16 @@ run_target(
     ],
 )
 
+openssl = dependency('openssl', required: true)
+
+apple_frameworks = dependency(
+    'appleframeworks',
+    modules: [
+        'CoreFoundation',
+        'Security',
+    ],
+)
+
 executable(
     'GH_Indexer',
     'src/GH/indexer.cpp',
@@ -64,9 +74,9 @@ executable(
     cpp_args: [
         '-I/opt/homebrew/opt/openssl@4/include',
     ],
-    link_args: [
-        '-lcrypto',
-        '-lssl',
+    dependencies: [
+        openssl,
+        apple_frameworks,
     ],
     install: false,
 )
