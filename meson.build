@@ -70,6 +70,7 @@ executable(
     'src/GH/indexer.cpp',
     include_directories: [
         include_directories('libs'),
+        include_directories('src/utilities'),
     ],
     cpp_args: [
         '-I/opt/homebrew/opt/openssl@4/include',

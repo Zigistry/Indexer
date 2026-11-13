@@ -19,25 +19,12 @@
 #include <httplib.h>
 #include <iostream>
 #include <json.hpp>
-
-const std::string repo_topic = "python";
-struct Range {
-    time_t low;
-    time_t high;
-    uint64_t repo_count;
-};
+#include <utilities.h>
 
 const httplib::Client client("https://api.github.com");
+
 std::string github_token;
-
-std::string epoch_to_timestamp_string(const time_t epoch)
-{
-    char timestamp_string[21];
-
-    std::strftime(timestamp_string, sizeof(timestamp_string),
-        "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&epoch));
-    return timestamp_string;
-}
+std::string repo_topic;
 
 uint64_t get_repo_count(const time_t low, const time_t high)
 {
@@ -126,8 +113,13 @@ void generate_ranges(std::vector<Range>& ranges, const time_t low,
     }
 }
 
-int main()
+int main(int argc, char* argv[])
 {
+    if(argc != 2) {
+        std::cerr << "Please provide topic name" << std::endl;
+    }
+
+    repo_topic = argv[1];
     const time_t current_epoch = time(nullptr);
 
     // I was 2 years old back then XD.
