@@ -1,5 +1,5 @@
-#include <iostream>
 #include "./stop_words.hpp"
+#include <iostream>
 
 using namespace std;
 

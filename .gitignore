@@ -8,3 +8,4 @@ search_preparer
 *.out
 build/
 libs/
+tmp/

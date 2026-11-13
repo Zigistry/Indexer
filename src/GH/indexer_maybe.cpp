@@ -1,31 +1,47 @@
-// I think I should retry doing the indexing part.
-// I have just added the docs.excalidraw in the docs.
-// thats the logic behind this:
-#include <iostream>
-#include <random>
+/*
+ * Copyright (c) Rohan Vashisht 2026.
+ * Please check LICENSE.txt and LICENSE-ADDITIONAL.txt for
+ * further details.
+ *
+ * This file will break a given timeline into
+ * multiple ranges which contain < 1000 repositories.
+ *
+ * Because GitHub can only return < 1000 repositories
+ * per query, breaking the timeline like this helps
+ * with easy indexing.
+ */
+
 #define CPPHTTPLIB_OPENSSL_SUPPORT
-#include <cstddef>
+
 #include <cstdint>
 #include <ctime>
 #include <format>
 #include <httplib.h>
+#include <iostream>
 #include <json.hpp>
 
+const std::string repo_topic = "python";
 struct Range {
     time_t low;
     time_t high;
     uint64_t repo_count;
 };
 
-const time_t month = 30ULL * 24ULL * 60ULL * 60ULL;
-const time_t day = 24ULL * 60ULL * 60ULL;
-
-const std::string repo_topic = "python";
+const httplib::Client client("https://api.github.com");
 std::string github_token;
+
+std::string epoch_to_timestamp_string(const time_t epoch)
+{
+    char timestamp_string[21];
+
+    std::strftime(timestamp_string, sizeof(timestamp_string),
+        "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&epoch));
+    return timestamp_string;
+}
 
 uint64_t get_repo_count(const time_t low, const time_t high)
 {
-    const std::string query = R"""(
+    const std::string get_repo_count_query = R"""(
 
             query($search_query: String!) {
                 search(
@@ -38,17 +54,14 @@ uint64_t get_repo_count(const time_t low, const time_t high)
 
     )""";
 
-    char low_date[21], high_date[21];
+    const std::string& search_query = std::format(
+        "topic:{} created:{}..{}", repo_topic, epoch_to_timestamp_string(low),
+        epoch_to_timestamp_string(high));
 
-    std::strftime(low_date, sizeof(low_date), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&low));
-    std::strftime(high_date, sizeof(high_date), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&high));
+    uint8_t retry_amount = 0;
 
-    const std::string& search_query = std::format("topic:{} created:{}..{}", repo_topic, low_date, high_date);
-
-    httplib::Client cli("https://api.github.com");
-
-    while (1) {
-        const auto response = cli.Post("/graphql",
+    while (retry_amount < 5) {
+        const auto response = client.Post("/graphql",
             httplib::Headers {
                 { "Authorization", "Bearer " + github_token },
                 { "Accept", "application/vnd.github+json" },
@@ -64,22 +77,40 @@ uint64_t get_repo_count(const time_t low, const time_t high)
                 .dump(),
             "application/json");
 
-        if (!response)
+        if (!response) {
+            std::cout << "Program is waiting for 500 seconds because no responce was "
+                         "recieved."
+                      << std::endl;
+            sleep(500);
+            retry_amount++;
             continue;
+        }
 
-        if (response->status != 200)
+        if (response->status != 200) {
+            std::cout << "Program is waiting for 500 seconds because a not 200 "
+                         "reponse was recieved."
+                      << std::endl;
+            sleep(500);
+            retry_amount++;
             continue;
+        }
 
-        const auto res = nlohmann::json::parse(response->body);
+        retry_amount = 0;
 
-        int repo_count = res["data"]["search"]["repositoryCount"];
-        std::cout << repo_count << std::endl;
+        const auto responce_as_json = nlohmann::json::parse(response->body);
+
+        const uint64_t repo_count = responce_as_json["data"]["search"]["repositoryCount"];
 
         return repo_count;
     }
+
+    std::cout << "Exiting after 5 retries." << std::endl;
+
+    std::exit(1);
 }
 
-void generate_ranges(std::vector<Range>& ranges, const time_t low, const time_t high)
+void generate_ranges(std::vector<Range>& ranges, const time_t low,
+    const time_t high)
 {
     const uint64_t repo_count = get_repo_count(low, high);
     if (low >= high) {
@@ -97,25 +128,27 @@ void generate_ranges(std::vector<Range>& ranges, const time_t low, const time_t 
 
 int main()
 {
-    const time_t current_epoch = time(NULL);
-    const time_t twenty_ten = 1262304000;
+    const time_t current_epoch = time(nullptr);
+
+    // I was 2 years old back then XD.
+    const time_t epoch_2008_march = 1204329600;
 
     const char* gh_token = getenv("GH_API_KEY");
 
-    if (gh_token == NULL) {
+    if (gh_token == nullptr) {
         std::cout << "GH_API_KEY not set." << std::endl;
         return 0;
     }
 
     github_token = gh_token;
 
-    std::vector<Range> res;
-    generate_ranges(res, twenty_ten, current_epoch);
+    std::vector<Range> time_ranges;
+    generate_ranges(time_ranges, epoch_2008_march, current_epoch);
 
-    std::ofstream output_file("ranges.csv", std::ios::out);
+    std::ofstream output_file("./tmp/github_ranges.csv", std::ios::out);
 
-    for (const Range &r : res) {
-        output_file << r.low << "," << r.high << "," << r.repo_count << std::endl;
+    for (const Range& time_range : time_ranges) {
+        output_file << time_range.low << "," << time_range.high << "," << time_range.repo_count << '\n';
     }
 
     return 0;
