@@ -17,8 +17,8 @@
 #include <ios>
 #include <iostream>
 #include <json.hpp>
-#include <utilities.h>
 #include <unordered_map>
+#include <utilities.h>
 
 std::string github_token;
 std::string repo_topic;
@@ -28,8 +28,8 @@ void index_range(Range range, std::string cursor,
 {
     const std::string query = R"""(
 
-        query RepositoriesByTopic($topic: String!, $cursor: String) {
-            search(query: $topic, type: REPOSITORY, first: 100, after: $cursor) {
+        query RepositoriesByTopic($search_query: String!, $cursor: String) {
+            search(query: $search_query, type: REPOSITORY, first: 100, after: $cursor) {
                 pageInfo {
                     endCursor
                     hasNextPage
@@ -56,18 +56,26 @@ void index_range(Range range, std::string cursor,
 
     std::string search_query;
 
-    if (cursor.empty()) {
-        search_query = std::format("topic:{} created:{}..{} cursor:null",
-            repo_topic, epoch_to_timestamp_string(range.low),
-            epoch_to_timestamp_string(range.high));
-    } else {
-        search_query = std::format("topic:{} created:{}..{} cursor:{}", repo_topic,
-            epoch_to_timestamp_string(range.low),
-            epoch_to_timestamp_string(range.high), cursor);
-    }
+    search_query = std::format("topic:{} created:{}..{}",
+        repo_topic, epoch_to_timestamp_string(range.low),
+        epoch_to_timestamp_string(range.high));
 
     uint8_t retry_amount = 0;
     httplib::Client client("https://api.github.com");
+
+    nlohmann::json request_body = {
+        { "query", query },
+        {
+            "variables",
+            {
+                { "search_query", search_query },
+            },
+        },
+    };
+
+    if (!cursor.empty()) {
+        request_body["variables"]["cursor"] = cursor;
+    }
 
     while (retry_amount < 5) {
         const auto response = client.Post("/graphql",
@@ -76,14 +84,7 @@ void index_range(Range range, std::string cursor,
                 { "Accept", "application/vnd.github+json" },
                 { "User-Agent", "Zigistry-Indexer" },
             },
-            nlohmann::json {
-                { "query", query },
-                {
-                    "variables",
-                    { { "search_query", search_query } },
-                },
-            }
-                .dump(),
+            request_body.dump(),
             "application/json");
 
         if (!response) {
@@ -99,6 +100,7 @@ void index_range(Range range, std::string cursor,
             std::cout << "Program is waiting for 500 seconds because a not 200 "
                          "reponse was recieved."
                       << std::endl;
+            std::cout  << "Response:\n" << response->body << std::endl;
             sleep(500);
             retry_amount++;
             continue;
@@ -106,8 +108,17 @@ void index_range(Range range, std::string cursor,
 
         retry_amount = 0;
 
+        if(response->body.empty()) {
+            std::cerr << "Somehow recieved empty string responce." << std::endl;
+            continue; 
+        }
+
         const auto responce_as_json = nlohmann::json::parse(response->body);
 
+        if (responce_as_json.contains("errors")) {
+            std::cerr << responce_as_json["errors"].dump(2) << std::endl;
+            continue;
+        }
         for (const auto& edge : responce_as_json["data"]["search"]["edges"]) {
             const auto& repo = edge["node"];
 
@@ -118,16 +129,17 @@ void index_range(Range range, std::string cursor,
                 commit = repo["defaultBranchRef"]["target"]["oid"];
             }
 
-            all_repos.insert_or_assign( name, commit );
+            all_repos.insert_or_assign(name, commit);
         }
-        const auto cursor = responce_as_json["data"]["search"]["pageInfo"]["endCursor"];
         const bool has_next = responce_as_json["data"]["search"]["pageInfo"]["hasNextPage"];
 
+            std::cout << "Indexer" << std::endl;
         if (has_next) {
+            sleep(5);
+            const std::string cursor = responce_as_json["data"]["search"]["pageInfo"]["endCursor"];
             index_range(range, cursor, all_repos);
-        } else {
-            return;
         }
+        return;
     }
 
     std::cout << "Exiting after 5 retries." << std::endl;
@@ -166,17 +178,19 @@ int main(int argc, char* argv[])
 
     std::unordered_map<std::string, std::string> all_repos;
 
-    #pragma omp parallel for
+    uint64_t indexed = 0;
+#pragma omp parallel for num_threads(10)
     for (const Range& range : all_ranges) {
         std::unordered_map<std::string, std::string> this_repos;
         index_range(range, "", this_repos);
-        #pragma omp critical
+#pragma omp critical
         {
+            std::cout << "Indexed: " << indexed++ << std::endl;
             all_repos.insert(this_repos.begin(), this_repos.end());
         }
     }
 
-    std::ofstream file("./tmp/github_indexes/csv", std::ios::in);
+    std::ofstream file("./tmp/github_indexed.csv", std::ios::out);
 
     for (const auto& [key, value] : all_repos) {
         file << key << ',' << value << '\n';
