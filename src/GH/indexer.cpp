@@ -9,18 +9,22 @@
  * latest commit hash.
  */
 
+#define CPPHTTPLIB_OPENSSL_SUPPORT
+
+#include <format>
 #include <fstream>
 #include <httplib.h>
 #include <ios>
 #include <iostream>
 #include <json.hpp>
 #include <utilities.h>
+#include <unordered_map>
 
 std::string github_token;
 std::string repo_topic;
 
 void index_range(Range range, std::string cursor,
-    std::vector<std::pair<std::string, std::string>>& all_repos)
+    std::unordered_map<std::string, std::string>& all_repos)
 {
     const std::string query = R"""(
 
@@ -63,7 +67,7 @@ void index_range(Range range, std::string cursor,
     }
 
     uint8_t retry_amount = 0;
-    const httplib::Client client("https://api.github.com");
+    httplib::Client client("https://api.github.com");
 
     while (retry_amount < 5) {
         const auto response = client.Post("/graphql",
@@ -114,9 +118,9 @@ void index_range(Range range, std::string cursor,
                 commit = repo["defaultBranchRef"]["target"]["oid"];
             }
 
-            all_repos.push_back({ name, commit });
+            all_repos.insert_or_assign( name, commit );
         }
-        const std::string cursor = responce_as_json["data"]["search"]["pageInfo"]["endCursor"];
+        const auto cursor = responce_as_json["data"]["search"]["pageInfo"]["endCursor"];
         const bool has_next = responce_as_json["data"]["search"]["pageInfo"]["hasNextPage"];
 
         if (has_next) {
@@ -155,14 +159,27 @@ int main(int argc, char* argv[])
     std::vector<Range> all_ranges;
     while (input_file.getline(line, sizeof(line))) {
         Range current_range;
-        std::sscanf(line, "%ld,%ld,%ull", &current_range.low, &current_range.high,
+        std::sscanf(line, "%ld,%ld,%llu", &current_range.low, &current_range.high,
             &current_range.repo_count);
         all_ranges.push_back(current_range);
     }
 
-    std::vector<std::pair<std::string, std::string>> all_repos;
+    std::unordered_map<std::string, std::string> all_repos;
 
-    for (Range& range : all_ranges) {
+    #pragma omp parallel for
+    for (const Range& range : all_ranges) {
+        std::unordered_map<std::string, std::string> this_repos;
+        index_range(range, "", this_repos);
+        #pragma omp critical
+        {
+            all_repos.insert(this_repos.begin(), this_repos.end());
+        }
+    }
+
+    std::ofstream file("./tmp/github_indexes/csv", std::ios::in);
+
+    for (const auto& [key, value] : all_repos) {
+        file << key << ',' << value << '\n';
     }
     return 0;
 }

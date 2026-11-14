@@ -21,7 +21,7 @@
 #include <json.hpp>
 #include <utilities.h>
 
-const httplib::Client client("https://api.github.com");
+httplib::Client client("https://api.github.com");
 
 std::string github_token;
 std::string repo_topic;

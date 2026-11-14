@@ -66,14 +66,40 @@ apple_frameworks = dependency(
 )
 
 executable(
-    'GH_Indexer',
-    'src/GH/indexer.cpp',
+    'GH_Range_Gen_for_Indexer',
+    'src/GH/range_generator_for_indexer.cpp',
+    'src/utilities/utilities.cpp',
     include_directories: [
         include_directories('libs'),
         include_directories('src/utilities'),
     ],
     cpp_args: [
         '-I/opt/homebrew/opt/openssl@4/include',
+    ],
+    dependencies: [
+        openssl,
+        apple_frameworks,
+    ],
+    install: false,
+)
+
+
+executable(
+    'GH_Indexer',
+    'src/GH/indexer.cpp',
+    'src/utilities/utilities.cpp',
+    include_directories: [
+        include_directories('libs'),
+        include_directories('src/utilities'),
+    ],
+    cpp_args: [
+        '-I/opt/homebrew/opt/openssl@4/include',
+        '-Xpreprocessor',
+        '-fopenmp',
+    ],
+    link_args: [
+        '-L/opt/homebrew/opt/libomp/lib',
+        '-lomp',
     ],
     dependencies: [
         openssl,
