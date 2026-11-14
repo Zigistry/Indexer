@@ -55,7 +55,7 @@ uint64_t get_repo_count(const time_t low, const time_t high)
                 { "User-Agent", "Zigistry-Indexer" },
             },
             nlohmann::json {
-                { "query", query },
+                { "query", get_repo_count_query },
                 {
                     "variables",
                     { { "search_query", search_query } },
@@ -115,7 +115,7 @@ void generate_ranges(std::vector<Range>& ranges, const time_t low,
 
 int main(int argc, char* argv[])
 {
-    if(argc != 2) {
+    if (argc != 2) {
         std::cerr << "Please provide topic name" << std::endl;
     }
 
@@ -140,7 +140,8 @@ int main(int argc, char* argv[])
     std::ofstream output_file("./tmp/github_ranges.csv", std::ios::out);
 
     for (const Range& time_range : time_ranges) {
-        output_file << time_range.low << "," << time_range.high << "," << time_range.repo_count << '\n';
+        output_file << time_range.low << "," << time_range.high << ","
+                    << time_range.repo_count << '\n';
     }
 
     return 0;

@@ -9,51 +9,160 @@
  * latest commit hash.
  */
 
-#include <iostream>
 #include <fstream>
-#include <utilities.h>
-#include <json.hpp>
 #include <httplib.h>
+#include <ios>
+#include <iostream>
+#include <json.hpp>
+#include <utilities.h>
 
+std::string github_token;
+std::string repo_topic;
 
- get_repo_name_and_commit_hash(const time_t low, const time_t high) {
-        const std::string get_repo_count_query = R"""(
+void index_range(Range range, std::string cursor,
+    std::vector<std::pair<std::string, std::string>>& all_repos)
+{
+    const std::string query = R"""(
 
-            query($search_query: String!) {
-                search(
-                    query: $search_query,
-                    type: REPOSITORY,
-                ) {
-                    repositoryCount
+        query RepositoriesByTopic($topic: String!, $cursor: String) {
+            search(query: $topic, type: REPOSITORY, first: 100, after: $cursor) {
+                pageInfo {
+                    endCursor
+                    hasNextPage
+                }
+
+                edges {
+                    node {
+                        ... on Repository {
+                            nameWithOwner
+                            defaultBranchRef {
+                                target {
+                                    ... on Commit {
+                                        oid
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
+        }
 
     )""";
 
-    const std::string& search_query = std::format(
-        "topic:{} created:{}..{}", repo_topic, epoch_to_timestamp_string(low),
-        epoch_to_timestamp_string(high));
+    std::string search_query;
+
+    if (cursor.empty()) {
+        search_query = std::format("topic:{} created:{}..{} cursor:null",
+            repo_topic, epoch_to_timestamp_string(range.low),
+            epoch_to_timestamp_string(range.high));
+    } else {
+        search_query = std::format("topic:{} created:{}..{} cursor:{}", repo_topic,
+            epoch_to_timestamp_string(range.low),
+            epoch_to_timestamp_string(range.high), cursor);
+    }
 
     uint8_t retry_amount = 0;
+    const httplib::Client client("https://api.github.com");
 
+    while (retry_amount < 5) {
+        const auto response = client.Post("/graphql",
+            httplib::Headers {
+                { "Authorization", "Bearer " + github_token },
+                { "Accept", "application/vnd.github+json" },
+                { "User-Agent", "Zigistry-Indexer" },
+            },
+            nlohmann::json {
+                { "query", query },
+                {
+                    "variables",
+                    { { "search_query", search_query } },
+                },
+            }
+                .dump(),
+            "application/json");
+
+        if (!response) {
+            std::cout << "Program is waiting for 500 seconds because no responce was "
+                         "recieved."
+                      << std::endl;
+            sleep(500);
+            retry_amount++;
+            continue;
+        }
+
+        if (response->status != 200) {
+            std::cout << "Program is waiting for 500 seconds because a not 200 "
+                         "reponse was recieved."
+                      << std::endl;
+            sleep(500);
+            retry_amount++;
+            continue;
+        }
+
+        retry_amount = 0;
+
+        const auto responce_as_json = nlohmann::json::parse(response->body);
+
+        for (const auto& edge : responce_as_json["data"]["search"]["edges"]) {
+            const auto& repo = edge["node"];
+
+            std::string name = repo["nameWithOwner"];
+
+            std::string commit;
+            if (!repo["defaultBranchRef"].is_null()) {
+                commit = repo["defaultBranchRef"]["target"]["oid"];
+            }
+
+            all_repos.push_back({ name, commit });
+        }
+        const std::string cursor = responce_as_json["data"]["search"]["pageInfo"]["endCursor"];
+        const bool has_next = responce_as_json["data"]["search"]["pageInfo"]["hasNextPage"];
+
+        if (has_next) {
+            index_range(range, cursor, all_repos);
+        } else {
+            return;
+        }
+    }
 
     std::cout << "Exiting after 5 retries." << std::endl;
 
     std::exit(1);
-
 }
 
-int main() {
+int main(int argc, char* argv[])
+{
+    if (argc != 2) {
+        std::cerr << "Please provide topic name" << std::endl;
+    }
+
+    repo_topic = argv[1];
+
+    const char* gh_token = getenv("GH_API_KEY");
+
+    if (gh_token == nullptr) {
+        std::cout << "GH_API_KEY not set." << std::endl;
+        return 0;
+    }
+
+    github_token = gh_token;
+
     std::ifstream input_file("./tmp/github_ranges.csv");
 
     char line[500];
 
-    Range current_range;
-    while(input_file.getline(line, sizeof(line))){
-        std::sscanf(line, "%ld,%ld,%ull", &current_range.low, &current_range.high, &current_range.repo_count);
+    std::vector<Range> all_ranges;
+    while (input_file.getline(line, sizeof(line))) {
+        Range current_range;
+        std::sscanf(line, "%ld,%ld,%ull", &current_range.low, &current_range.high,
+            &current_range.repo_count);
+        all_ranges.push_back(current_range);
+    }
 
+    std::vector<std::pair<std::string, std::string>> all_repos;
 
-
+    for (Range& range : all_ranges) {
     }
     return 0;
 }
