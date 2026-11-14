@@ -100,7 +100,8 @@ void index_range(Range range, std::string cursor,
             std::cout << "Program is waiting for 500 seconds because a not 200 "
                          "reponse was recieved."
                       << std::endl;
-            std::cout  << "Response:\n" << response->body << std::endl;
+            std::cout << "Response:\n"
+                      << response->body << std::endl;
             sleep(500);
             retry_amount++;
             continue;
@@ -108,9 +109,9 @@ void index_range(Range range, std::string cursor,
 
         retry_amount = 0;
 
-        if(response->body.empty()) {
+        if (response->body.empty()) {
             std::cerr << "Somehow recieved empty string responce." << std::endl;
-            continue; 
+            continue;
         }
 
         const auto responce_as_json = nlohmann::json::parse(response->body);
@@ -133,7 +134,7 @@ void index_range(Range range, std::string cursor,
         }
         const bool has_next = responce_as_json["data"]["search"]["pageInfo"]["hasNextPage"];
 
-            std::cout << "Indexer" << std::endl;
+        std::cout << "Indexer" << std::endl;
         if (has_next) {
             sleep(5);
             const std::string cursor = responce_as_json["data"]["search"]["pageInfo"]["endCursor"];

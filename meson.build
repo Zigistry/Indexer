@@ -75,6 +75,12 @@ executable(
     ],
     cpp_args: [
         '-I/opt/homebrew/opt/openssl@4/include',
+        '-Xpreprocessor',
+        '-fopenmp',
+    ],
+    link_args: [
+        '-L/opt/homebrew/opt/libomp/lib',
+        '-lomp',
     ],
     dependencies: [
         openssl,
