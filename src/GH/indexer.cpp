@@ -61,7 +61,10 @@ void index_range(Range range, std::string cursor,
         epoch_to_timestamp_string(range.high));
 
     uint8_t retry_amount = 0;
-    httplib::Client client("https://api.github.com");
+    thread_local httplib::Client client("https://api.github.com");
+    client.set_connection_timeout(10, 0);
+    client.set_read_timeout(10, 0);
+    client.set_keep_alive(true);
 
     nlohmann::json request_body = {
         { "query", query },
@@ -75,6 +78,8 @@ void index_range(Range range, std::string cursor,
 
     if (!cursor.empty()) {
         request_body["variables"]["cursor"] = cursor;
+    } else {
+        request_body["variables"]["cursor"] = nullptr;
     }
 
     while (retry_amount < 5) {
@@ -88,59 +93,67 @@ void index_range(Range range, std::string cursor,
             "application/json");
 
         if (!response) {
-            std::cout << "Program is waiting for 500 seconds because no responce was "
-                         "recieved."
-                      << std::endl;
-            sleep(500);
+            std::cerr << "No response recieved waiting for 50 seconds" << std::endl;
+            sleep(50);
             retry_amount++;
             continue;
         }
-
-        if (response->status != 200) {
-            std::cout << "Program is waiting for 500 seconds because a not 200 "
-                         "reponse was recieved."
-                      << std::endl;
-            std::cout << "Response:\n"
-                      << response->body << std::endl;
-            sleep(500);
-            retry_amount++;
-            continue;
-        }
-
-        retry_amount = 0;
-
-        if (response->body.empty()) {
-            std::cerr << "Somehow recieved empty string responce." << std::endl;
-            continue;
-        }
-
-        const auto responce_as_json = nlohmann::json::parse(response->body);
-
-        if (responce_as_json.contains("errors")) {
-            std::cerr << responce_as_json["errors"].dump(2) << std::endl;
-            continue;
-        }
-        for (const auto& edge : responce_as_json["data"]["search"]["edges"]) {
-            const auto& repo = edge["node"];
-
-            std::string name = repo["nameWithOwner"];
-
-            std::string commit;
-            if (!repo["defaultBranchRef"].is_null()) {
-                commit = repo["defaultBranchRef"]["target"]["oid"];
+        if (response->status == 200) {
+            const auto response_as_json = nlohmann::json::parse(response->body);
+            if (response_as_json.contains("errors")) {
+                std::cerr
+                    << "Responce contained following error wainting for 500 seconds:"
+                    << std::endl;
+                std::cerr << response_as_json << std::endl;
+                sleep(500);
+                retry_amount++;
+                continue;
             }
 
-            all_repos.insert_or_assign(name, commit);
-        }
-        const bool has_next = responce_as_json["data"]["search"]["pageInfo"]["hasNextPage"];
+            retry_amount = 0;
 
-        std::cout << "Indexer" << std::endl;
-        if (has_next) {
-            sleep(5);
-            const std::string cursor = responce_as_json["data"]["search"]["pageInfo"]["endCursor"];
-            index_range(range, cursor, all_repos);
+            for (const auto& edge : response_as_json["data"]["search"]["edges"]) {
+                const auto& repo = edge["node"];
+
+                std::string name = repo["nameWithOwner"];
+
+                std::string commit;
+                if (!repo["defaultBranchRef"].is_null()) {
+                    commit = repo["defaultBranchRef"]["target"]["oid"];
+                }
+
+                all_repos.insert_or_assign(name, commit);
+            }
+            const bool has_next = response_as_json["data"]["search"]["pageInfo"]["hasNextPage"];
+
+            std::cout << "Indexer" << std::endl;
+            if (has_next) {
+                const std::string cursor = response_as_json["data"]["search"]["pageInfo"]["endCursor"];
+                index_range(range, cursor, all_repos);
+            }
+            return;
+        } else {
+            std::cerr << "Error code: " << response->status << std::endl;
+            retry_amount++;
+
+            switch (response->status) {
+            case 403:
+                std::cerr << "Waiting for 500 seconds." << std::endl;
+                sleep(500);
+                continue;
+            case 503:
+            case 504:
+            case 500:
+            case 502:
+                std::cerr << "Waiting for 2 seconds." << std::endl;
+                sleep(2);
+                continue;
+            case 401:
+            case 400:
+                std::cerr << "Exiting" << std::endl;
+                std::exit(1);
+            }
         }
-        return;
     }
 
     std::cout << "Exiting after 5 retries." << std::endl;
@@ -152,6 +165,7 @@ int main(int argc, char* argv[])
 {
     if (argc != 2) {
         std::cerr << "Please provide topic name" << std::endl;
+        return 1;
     }
 
     repo_topic = argv[1];
@@ -179,16 +193,12 @@ int main(int argc, char* argv[])
 
     std::unordered_map<std::string, std::string> all_repos;
 
-    uint64_t indexed = 0;
-#pragma omp parallel for num_threads(10)
+    #pragma omp parallel for num_threads(8) shared(all_repos)
     for (const Range& range : all_ranges) {
         std::unordered_map<std::string, std::string> this_repos;
         index_range(range, "", this_repos);
-#pragma omp critical
-        {
-            std::cout << "Indexed: " << indexed++ << std::endl;
-            all_repos.insert(this_repos.begin(), this_repos.end());
-        }
+        #pragma omp critical
+        all_repos.insert(this_repos.begin(), this_repos.end());
     }
 
     std::ofstream file("./tmp/github_indexed.csv", std::ios::out);

@@ -46,9 +46,9 @@ run_target(
         '''
       cd "$MESON_SOURCE_ROOT"
 
-      clang-format -i --style=WebKit src/**/*.cpp
-      clang-format -i --style=WebKit src/**/*.h
-      clang-format -i --style=WebKit src/**/*.hpp
+      clang-format -i --style='{BasedOnStyle: WebKit, IndentPPDirectives: Leave}' src/**/*.cpp
+      clang-format -i --style='{BasedOnStyle: WebKit, IndentPPDirectives: Leave}' src/**/*.h
+      clang-format -i --style='{BasedOnStyle: WebKit, IndentPPDirectives: Leave}' src/**/*.hpp
 
       meson format -i
     ''',

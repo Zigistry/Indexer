@@ -40,16 +40,17 @@ uint64_t get_repo_count(const time_t low, const time_t high)
     )""";
 
     const std::string& search_query = std::format(
-        "topic:{} created:{}..{}", repo_topic, epoch_to_timestamp_string(low),
+        "topic:{} created:{}..{}", repo_topic,
+        epoch_to_timestamp_string(low),
         epoch_to_timestamp_string(high));
 
     uint8_t retry_amount = 0;
 
     while (retry_amount < 5) {
-        httplib::Client client("https://api.github.com");
+        thread_local httplib::Client client("https://api.github.com");
         client.set_connection_timeout(10, 0);
         client.set_read_timeout(10, 0);
-
+        client.set_keep_alive(true);
         const auto response = client.Post("/graphql",
             httplib::Headers {
                 { "Authorization", "Bearer " + github_token },
@@ -67,48 +68,53 @@ uint64_t get_repo_count(const time_t low, const time_t high)
             "application/json");
 
         if (!response) {
-            std::cout << "Program is waiting for 50 seconds because no responce was "
-                         "recieved."
-                      << std::endl;
+            std::cerr << "No response recieved waiting for 50 seconds" << std::endl;
             sleep(50);
             retry_amount++;
             continue;
         }
-        if (response->status == 403) {
-            sleep(500);
-            continue;
-        }
-        if (response->status > 500) {
-            sleep(2);
-            retry_amount++;
-            continue;
-        }
-        if (response->status != 200) {
-            std::cout << "Program is waiting for 500 seconds because a not 200 "
-                         "reponse was recieved."
-                      << std::endl;
-            sleep(50);
-            retry_amount++;
-            continue;
-        }
-        retry_amount = 0;
+        if (response->status == 200) {
+            const auto responce_as_json = nlohmann::json::parse(response->body);
+            if (responce_as_json.contains("errors")) {
+                std::cerr
+                    << "Responce contained following error wainting for 500 seconds:"
+                    << std::endl;
+                std::cerr << responce_as_json << std::endl;
+                sleep(500);
+                retry_amount++;
+                continue;
+            }
 
-        const auto responce_as_json = nlohmann::json::parse(response->body);
-        if (responce_as_json.contains("errors")) {
-            std::cout
-                << "Responce contained following error wainting for 500 seconds:"
-                << std::endl;
-            std::cout << responce_as_json << std::endl;
-            sleep(500);
-            retry_amount++;
-            continue;
-        }
-        const uint64_t repo_count = responce_as_json["data"]["search"]["repositoryCount"];
+            retry_amount = 0;
 
-        return repo_count;
+            const uint64_t repo_count = responce_as_json["data"]["search"]["repositoryCount"];
+
+            return repo_count;
+        } else {
+            std::cerr << "Error code: " << response->status << std::endl;
+            retry_amount++;
+
+            switch (response->status) {
+            case 403:
+                std::cerr << "Waiting for 500 seconds." << std::endl;
+                sleep(500);
+                continue;
+            case 503:
+            case 504:
+            case 500:
+            case 502:
+                std::cerr << "Waiting for 2 seconds." << std::endl;
+                sleep(2);
+                continue;
+            case 401:
+            case 400:
+                std::cerr << "Exiting" << std::endl;
+                std::exit(1);
+            }
+        }
     }
 
-    std::cout << "Exiting after 5 retries." << std::endl;
+    std::cerr << "Exiting after 5 retries." << std::endl;
 
     std::exit(1);
 }
@@ -116,21 +122,22 @@ uint64_t get_repo_count(const time_t low, const time_t high)
 void generate_ranges(std::vector<Range>& ranges, const time_t low,
     const time_t high)
 {
-    const uint64_t repo_count = get_repo_count(low, high);
     if (low > high) {
         return;
     }
-    std::cout << "Now indexing: " << low << "," << high << std::endl;
+
+    const uint64_t repo_count = get_repo_count(low, high);
 
     if (low == high || repo_count < 1000) {
-#pragma omp critical
+        #pragma omp critical
         ranges.push_back({ low, high, repo_count });
-        return;
+        std::cerr << "Completed: " << low << "," << high << std::endl;
     } else {
         const time_t mid = low + (high - low) / 2;
-#pragma omp task shared(ranges)
+
+        #pragma omp task shared(ranges)
         generate_ranges(ranges, low, mid);
-#pragma omp task shared(ranges)
+        #pragma omp task shared(ranges)
         generate_ranges(ranges, mid + 1, high);
     }
 }
@@ -149,18 +156,17 @@ int main(int argc, char* argv[])
     const time_t epoch_2008_march = 1204329600;
 
     const char* gh_token = getenv("GH_API_KEY");
-
     if (gh_token == nullptr) {
-        std::cout << "GH_API_KEY not set." << std::endl;
+        std::cerr << "GH_API_KEY not set." << std::endl;
         return 1;
     }
-
     github_token = gh_token;
 
     std::vector<Range> time_ranges;
+
     // https://stackoverflow.com/questions/68502197/how-do-omp-single-and-omp-task-provide-parallelism
-#pragma omp parallel num_threads(8)
-#pragma omp single
+    #pragma omp parallel num_threads(8)
+    #pragma omp single
     generate_ranges(time_ranges, epoch_2008_march, current_epoch);
 
     std::ofstream output_file("./tmp/github_ranges.csv", std::ios::out);
