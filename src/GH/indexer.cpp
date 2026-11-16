@@ -28,29 +28,21 @@ void index_range(Range range, std::string cursor,
 {
     const std::string query = R"""(
 
-        query RepositoriesByTopic($search_query: String!, $cursor: String) {
-            search(query: $search_query, type: REPOSITORY, first: 100, after: $cursor) {
-                pageInfo {
-                    endCursor
-                    hasNextPage
-                }
-
-                edges {
-                    node {
-                        ... on Repository {
-                            nameWithOwner
-                            defaultBranchRef {
-                                target {
-                                    ... on Commit {
-                                        oid
-                                    }
-                                }
-                            }
-                        }
-                    }
+    query RepositoriesByTopic($search_query: String!, $cursor: String) {
+        search(query: $search_query, type: REPOSITORY, first: 100, after: $cursor) {
+            nodes {
+                ... on Repository {
+                    nameWithOwner
+                    pushedAt
                 }
             }
+
+            pageInfo {
+                endCursor
+                hasNextPage
+            }
         }
+    }
 
     )""";
 
@@ -112,18 +104,17 @@ void index_range(Range range, std::string cursor,
 
             retry_amount = 0;
 
-            for (const auto& edge : response_as_json["data"]["search"]["edges"]) {
-                const auto& repo = edge["node"];
-
+            for (const auto& repo : response_as_json["data"]["search"]["nodes"]) {
                 std::string name = repo["nameWithOwner"];
 
                 std::string commit;
-                if (!repo["defaultBranchRef"].is_null()) {
-                    commit = repo["defaultBranchRef"]["target"]["oid"];
-                }
+                // if (!repo["defaultBranchRef"].is_null()) {
+                //     commit = repo["defaultBranchRef"]["target"]["oid"];
+                // }
 
                 all_repos.insert_or_assign(name, commit);
             }
+
             const bool has_next = response_as_json["data"]["search"]["pageInfo"]["hasNextPage"];
 
             std::cout << "Indexer" << std::endl;
