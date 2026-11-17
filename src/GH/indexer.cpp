@@ -23,8 +23,15 @@
 std::string github_token;
 std::string repo_topic;
 
+time_t datetime_to_epoch(const std::string& datetime)
+{
+    std::tm tm { };
+    std::istringstream(datetime) >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
+    return timegm(&tm);
+}
+
 void index_range(Range range, std::string cursor,
-    std::unordered_map<std::string, std::string>& all_repos)
+    std::vector<std::string>& all_repos)
 {
     const std::string query = R"""(
 
@@ -33,7 +40,6 @@ void index_range(Range range, std::string cursor,
             nodes {
                 ... on Repository {
                     nameWithOwner
-                    pushedAt
                 }
             }
 
@@ -105,14 +111,9 @@ void index_range(Range range, std::string cursor,
             retry_amount = 0;
 
             for (const auto& repo : response_as_json["data"]["search"]["nodes"]) {
-                std::string name = repo["nameWithOwner"];
+                const std::string repo_full_name = repo["nameWithOwner"];
 
-                std::string commit;
-                // if (!repo["defaultBranchRef"].is_null()) {
-                //     commit = repo["defaultBranchRef"]["target"]["oid"];
-                // }
-
-                all_repos.insert_or_assign(name, commit);
+                all_repos.push_back(repo_full_name);
             }
 
             const bool has_next = response_as_json["data"]["search"]["pageInfo"]["hasNextPage"];
@@ -143,6 +144,11 @@ void index_range(Range range, std::string cursor,
             case 400:
                 std::cerr << "Exiting" << std::endl;
                 std::exit(1);
+            default:
+                std::cerr << "Unexpected HTTP status: "
+                          << response->status << '\n';
+                sleep(5);
+                continue;
             }
         }
     }
@@ -182,20 +188,20 @@ int main(int argc, char* argv[])
         all_ranges.push_back(current_range);
     }
 
-    std::unordered_map<std::string, std::string> all_repos;
+    std::vector<std::string> all_repos;
 
     #pragma omp parallel for num_threads(8) shared(all_repos)
     for (const Range& range : all_ranges) {
-        std::unordered_map<std::string, std::string> this_repos;
+        std::vector<std::string> this_repos;
         index_range(range, "", this_repos);
         #pragma omp critical
-        all_repos.insert(this_repos.begin(), this_repos.end());
+        all_repos.insert(all_repos.end(), this_repos.begin(), this_repos.end());
     }
 
     std::ofstream file("./tmp/github_indexed.csv", std::ios::out);
 
-    for (const auto& [key, value] : all_repos) {
-        file << key << ',' << value << '\n';
+    for (const auto& repo : all_repos) {
+        file << repo << '\n';
     }
     return 0;
 }

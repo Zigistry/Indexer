@@ -110,8 +110,7 @@ CREATE TABLE release_dependencies (
 
 CREATE TABLE index_sections (
     section_name VARCHAR(20) NOT NULL COLLATE NOCASE,
-    repo_id VARCHAR(150) NOT NULL COLLATE NOCASE,
-    PRIMARY KEY (section_name, repo_id),
+    repo_id VARCHAR(150) PRIMARY KEY COLLATE NOCASE,
     FOREIGN KEY (repo_id) REFERENCES repos (id) ON DELETE CASCADE
 ) WITHOUT ROWID;
 
