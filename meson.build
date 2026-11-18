@@ -18,7 +18,6 @@ run_target(
         'sh',
         '-c',
         '''
-
         set -eu
 
         cd "$MESON_SOURCE_ROOT"
@@ -33,8 +32,7 @@ run_target(
 
         curl -fL https://raw.githubusercontent.com/yhirose/cpp-httplib/refs/heads/master/httplib.h -o libs/httplib.h
         curl -fL https://github.com/nlohmann/json/releases/download/v3.12.0/json.hpp -o libs/json.hpp
-
-    ''',
+        ''',
     ],
 )
 
@@ -44,26 +42,34 @@ run_target(
         'sh',
         '-c',
         '''
-      cd "$MESON_SOURCE_ROOT"
+        cd "$MESON_SOURCE_ROOT"
 
-      clang-format -i --style='{BasedOnStyle: WebKit, IndentPPDirectives: Leave}' src/**/*.cpp
-      clang-format -i --style='{BasedOnStyle: WebKit, IndentPPDirectives: Leave}' src/**/*.h
-      clang-format -i --style='{BasedOnStyle: WebKit, IndentPPDirectives: Leave}' src/**/*.hpp
+        clang-format -i --style='{BasedOnStyle: WebKit, IndentPPDirectives: Leave}' src/**/*.cpp
+        clang-format -i --style='{BasedOnStyle: WebKit, IndentPPDirectives: Leave}' src/**/*.h
+        clang-format -i --style='{BasedOnStyle: WebKit, IndentPPDirectives: Leave}' src/**/*.hpp
 
-      meson format -i
-    ''',
+        meson format -i
+        ''',
     ],
 )
 
 openssl = dependency('openssl', required: true)
+openmp = dependency('openmp', language: 'cpp', required: true)
 
-apple_frameworks = dependency(
-    'appleframeworks',
-    modules: [
-        'CoreFoundation',
-        'Security',
-    ],
-)
+platform_dependencies = [
+    openssl,
+    openmp,
+]
+
+if host_machine.system() == 'darwin'
+    platform_dependencies += dependency(
+        'appleframeworks',
+        modules: [
+            'CoreFoundation',
+            'Security',
+        ],
+    )
+endif
 
 executable(
     'GH_Range_Gen_for_Indexer',
@@ -73,22 +79,9 @@ executable(
         include_directories('libs'),
         include_directories('src/utilities'),
     ],
-    cpp_args: [
-        '-I/opt/homebrew/opt/openssl@4/include',
-        '-Xpreprocessor',
-        '-fopenmp',
-    ],
-    link_args: [
-        '-L/opt/homebrew/opt/libomp/lib',
-        '-lomp',
-    ],
-    dependencies: [
-        openssl,
-        apple_frameworks,
-    ],
+    dependencies: platform_dependencies,
     install: false,
 )
-
 
 executable(
     'GH_Indexer',
@@ -98,18 +91,7 @@ executable(
         include_directories('libs'),
         include_directories('src/utilities'),
     ],
-    cpp_args: [
-        '-I/opt/homebrew/opt/openssl@4/include',
-        '-Xpreprocessor',
-        '-fopenmp',
-    ],
-    link_args: [
-        '-L/opt/homebrew/opt/libomp/lib',
-        '-lomp',
-    ],
-    dependencies: [
-        openssl,
-        apple_frameworks,
-    ],
+    dependencies: platform_dependencies,
     install: false,
 )
+

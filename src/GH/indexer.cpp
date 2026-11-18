@@ -17,7 +17,6 @@
 #include <ios>
 #include <iostream>
 #include <json.hpp>
-#include <unordered_map>
 #include <utilities.h>
 
 std::string github_token;
@@ -54,8 +53,8 @@ void index_range(Range range, std::string cursor,
 
     std::string search_query;
 
-    search_query = std::format("topic:{} created:{}..{}",
-        repo_topic, epoch_to_timestamp_string(range.low),
+    search_query = std::format("topic:{} created:{}..{}", repo_topic,
+        epoch_to_timestamp_string(range.low),
         epoch_to_timestamp_string(range.high));
 
     uint8_t retry_amount = 0;
@@ -87,8 +86,7 @@ void index_range(Range range, std::string cursor,
                 { "Accept", "application/vnd.github+json" },
                 { "User-Agent", "Zigistry-Indexer" },
             },
-            request_body.dump(),
-            "application/json");
+            request_body.dump(), "application/json");
 
         if (!response) {
             std::cerr << "No response recieved waiting for 50 seconds" << std::endl;
@@ -145,8 +143,7 @@ void index_range(Range range, std::string cursor,
                 std::cerr << "Exiting" << std::endl;
                 std::exit(1);
             default:
-                std::cerr << "Unexpected HTTP status: "
-                          << response->status << '\n';
+                std::cerr << "Unexpected HTTP status: " << response->status << '\n';
                 sleep(5);
                 continue;
             }
@@ -190,11 +187,11 @@ int main(int argc, char* argv[])
 
     std::vector<std::string> all_repos;
 
-    #pragma omp parallel for num_threads(8) shared(all_repos)
+#pragma omp parallel for num_threads(8) shared(all_repos)
     for (const Range& range : all_ranges) {
         std::vector<std::string> this_repos;
         index_range(range, "", this_repos);
-        #pragma omp critical
+#pragma omp critical
         all_repos.insert(all_repos.end(), this_repos.begin(), this_repos.end());
     }
 
