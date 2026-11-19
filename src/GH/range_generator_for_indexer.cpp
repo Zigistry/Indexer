@@ -11,14 +11,12 @@
  * with easy indexing.
  */
 
-#define CPPHTTPLIB_OPENSSL_SUPPORT
-
 #include <cstdint>
 #include <ctime>
 #include <format>
 #include <httplib.h>
 #include <iostream>
-#include <json.hpp>
+#include <nlohmann/json.hpp>
 #include <utilities.h>
 
 std::string github_token;
@@ -40,8 +38,7 @@ uint64_t get_repo_count(const time_t low, const time_t high)
     )""";
 
     const std::string& search_query = std::format(
-        "topic:{} created:{}..{}", repo_topic,
-        epoch_to_timestamp_string(low),
+        "topic:{} created:{}..{}", repo_topic, epoch_to_timestamp_string(low),
         epoch_to_timestamp_string(high));
 
     uint8_t retry_amount = 0;
@@ -129,15 +126,15 @@ void generate_ranges(std::vector<Range>& ranges, const time_t low,
     const uint64_t repo_count = get_repo_count(low, high);
 
     if (low == high || repo_count < 1000) {
-        #pragma omp critical
+#pragma omp critical
         ranges.push_back({ low, high, repo_count });
         std::cerr << "Completed: " << low << "," << high << std::endl;
     } else {
         const time_t mid = low + (high - low) / 2;
 
-        #pragma omp task shared(ranges)
+#pragma omp task shared(ranges)
         generate_ranges(ranges, low, mid);
-        #pragma omp task shared(ranges)
+#pragma omp task shared(ranges)
         generate_ranges(ranges, mid + 1, high);
     }
 }
@@ -164,9 +161,9 @@ int main(int argc, char* argv[])
 
     std::vector<Range> time_ranges;
 
-    // https://stackoverflow.com/questions/68502197/how-do-omp-single-and-omp-task-provide-parallelism
-    #pragma omp parallel num_threads(8)
-    #pragma omp single
+// https://stackoverflow.com/questions/68502197/how-do-omp-single-and-omp-task-provide-parallelism
+#pragma omp parallel num_threads(8)
+#pragma omp single
     generate_ranges(time_ranges, epoch_2008_march, current_epoch);
 
     std::ofstream output_file("./tmp/github_ranges.csv", std::ios::out);

@@ -9,14 +9,12 @@
  * latest commit hash.
  */
 
-#define CPPHTTPLIB_OPENSSL_SUPPORT
-
 #include <format>
 #include <fstream>
 #include <httplib.h>
 #include <ios>
 #include <iostream>
-#include <json.hpp>
+#include <nlohmann/json.hpp>
 #include <utilities.h>
 
 std::string github_token;
