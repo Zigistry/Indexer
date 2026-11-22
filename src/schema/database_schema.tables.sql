@@ -115,12 +115,12 @@ CREATE TABLE index_sections (
 ) WITHOUT ROWID;
 
 -- For this specifically, I have created a fasttext validation, I will train it to detect
--- all the scam repos, if my AI algorithm flags a repo
+-- all the scam repos, if fasttext algorithm flags a repo
 -- to review it will be added to this table as quarantined, if no problem, it will continue.
 CREATE TABLE repo_pipeline_queue (
     id VARCHAR(150) PRIMARY KEY COLLATE NOCASE,
     type_of_repo VARCHAR(10) NOT NULL,           -- 'package' or 'program'
-    status VARCHAR(20) NOT NULL DEFAULT 'pending_check', -- 'pending_check', 'safe', 'quarantined', 'needs_update', 'indexed'
+    status VARCHAR(20) NOT NULL DEFAULT 'pending_check', -- 'pending_check', 'safe', 'quarantined', 'indexed'
     reason TEXT,
     queued_at INTEGER NOT NULL,
     processed_at INTEGER
@@ -136,7 +136,7 @@ CREATE TABLE banned_users (
 
 -- This is for making it easier to fetch
 -- details of these repositories
--- to improve the accuracy of the algorithm
+-- to improve the accuracy of the Fast text algorithm
 -- which detects such repos.
 CREATE TABLE banned_repos (
     id VARCHAR(150) PRIMARY KEY COLLATE NOCASE,
