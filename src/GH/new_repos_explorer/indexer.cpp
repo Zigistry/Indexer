@@ -21,10 +21,6 @@ int main()
 
         if (!query.executeStep()) {
             std::cout << id << " not in db" << std::endl;
-            SQLite::Statement query2(db, "INSERT INTO repo_pipeline_queue (?,?,?,?,?,?)");
-            query2.bind(1, id);
-            query2.bind(1, "pending_check");
-
         }
         query.reset();
     }
