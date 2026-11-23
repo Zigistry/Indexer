@@ -6,7 +6,7 @@
 
 int main()
 {
-    std::ifstream input_file("./tmp/github_indexes.csv");
+    std::ifstream input_file("./tmp/github_crawler_output.csv");
 
     SQLite::Database db("./tmp/zigistry.db", SQLite::OPEN_READWRITE);
 

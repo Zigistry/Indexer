@@ -12,23 +12,12 @@
 #include <format>
 #include <fstream>
 #include <httplib.h>
-#include <ios>
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include <utilities.h>
 
-std::string github_token;
-std::string repo_topic;
-
-time_t datetime_to_epoch(const std::string& datetime)
-{
-    std::tm tm { };
-    std::istringstream(datetime) >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
-    return timegm(&tm);
-}
-
 void index_range(Range range, std::string cursor,
-    std::vector<std::string>& all_repos)
+    std::vector<std::string>& all_repos, const std::string repo_topic, const std::string github_token)
 {
     const std::string query = R"""(
 
@@ -117,7 +106,7 @@ void index_range(Range range, std::string cursor,
             std::cout << "Indexer" << std::endl;
             if (has_next) {
                 const std::string cursor = response_as_json["data"]["search"]["pageInfo"]["endCursor"];
-                index_range(range, cursor, all_repos);
+                index_range(range, cursor, all_repos, repo_topic, github_token);
             }
             return;
         } else {
@@ -160,7 +149,7 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    repo_topic = argv[1];
+    const std::string repo_topic = argv[1];
 
     const char* gh_token = getenv("GH_API_KEY");
 
@@ -169,9 +158,9 @@ int main(int argc, char* argv[])
         return 0;
     }
 
-    github_token = gh_token;
+    const std::string github_token = gh_token;
 
-    std::ifstream input_file("./tmp/github_ranges.csv");
+    std::ifstream input_file("./tmp/github_ranges_for_crawler.csv");
 
     char line[500];
 
@@ -185,15 +174,15 @@ int main(int argc, char* argv[])
 
     std::vector<std::string> all_repos;
 
-#pragma omp parallel for num_threads(8) shared(all_repos)
+    #pragma omp parallel for num_threads(8) shared(all_repos)
     for (const Range& range : all_ranges) {
         std::vector<std::string> this_repos;
-        index_range(range, "", this_repos);
-#pragma omp critical
+        index_range(range, "", this_repos, repo_topic, github_token);
+        #pragma omp critical
         all_repos.insert(all_repos.end(), this_repos.begin(), this_repos.end());
     }
 
-    std::ofstream file("./tmp/github_indexed.csv", std::ios::out);
+    std::ofstream file("./tmp/github_crawler_output.csv", std::ios::out);
 
     for (const auto& repo : all_repos) {
         file << repo << '\n';
