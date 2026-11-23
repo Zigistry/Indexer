@@ -113,8 +113,8 @@ void generate_ranges(std::vector<Range>& ranges, const time_t low,
         const time_t mid = low + (high - low) / 2;
 
         #pragma omp task shared(ranges)
-        generate_ranges(ranges, low, mid, repo_topic, github_token);
+        generate_ranges(ranges, low, mid, repo_topic, github_token, query_type);
         #pragma omp task shared(ranges)
-        generate_ranges(ranges, mid + 1, high, repo_topic, github_token);
+        generate_ranges(ranges, mid + 1, high, repo_topic, github_token, query_type);
     }
 }
