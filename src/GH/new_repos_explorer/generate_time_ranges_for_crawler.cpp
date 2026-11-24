@@ -25,7 +25,7 @@ int main(int argc, char* argv[])
     const time_t current_epoch = time(nullptr);
 
     // I was 2 years old back then XD.
-    const time_t epoch_2008_march = 1204329600;
+    const time_t epoch_2008_march = 1191196800;
 
     const char* gh_token = getenv("GH_API_KEY");
     if (gh_token == nullptr) {
@@ -41,7 +41,7 @@ int main(int argc, char* argv[])
     #pragma omp single
     generate_ranges(time_ranges, epoch_2008_march, current_epoch, repo_topic, github_token, "created");
 
-    std::ofstream output_file("./tmp/github_ranges_for_crawler.csv", std::ios::out);
+    std::ofstream output_file("./tmp/github_time_ranges_for_crawler.csv", std::ios::out);
 
     for (const Range& time_range : time_ranges) {
         output_file << time_range.low << "," << time_range.high << ","

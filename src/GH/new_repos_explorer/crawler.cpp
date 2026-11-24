@@ -160,7 +160,7 @@ int main(int argc, char* argv[])
 
     const std::string github_token = gh_token;
 
-    std::ifstream input_file("./tmp/github_ranges_for_crawler.csv");
+    std::ifstream input_file("./tmp/github_time_ranges_for_crawler.csv");
 
     char line[500];
 
@@ -182,7 +182,7 @@ int main(int argc, char* argv[])
         all_repos.insert(all_repos.end(), this_repos.begin(), this_repos.end());
     }
 
-    std::ofstream file("./tmp/github_crawler_output.csv", std::ios::out);
+    std::ofstream file("./tmp/github_every_repo_name_and_owner_name.txt", std::ios::out);
 
     for (const auto& repo : all_repos) {
         file << repo << '\n';
