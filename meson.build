@@ -72,27 +72,61 @@ if host_machine.system() == 'darwin'
     )
 endif
 
-executable(
-    'GH_Range_Gen_for_Indexer',
-    'src/GH/range_generator_for_indexer.cpp',
+gh_include_directories = include_directories('src/GH')
+utilities_include_directories = include_directories('src/utilities')
+
+common_gh_sources = [
+    'src/GH/generate_time_ranges.cpp',
     'src/utilities/utilities.cpp',
+]
+
+executable(
+    'GH_Range_Gen_for_Crawler',
+    'src/GH/new_repos_explorer/generate_time_ranges_for_crawler.cpp',
+    common_gh_sources,
     include_directories: [
-        include_directories('src/utilities'),
+        gh_include_directories,
+        utilities_include_directories,
     ],
     dependencies: platform_dependencies,
     install: false,
 )
 
 executable(
-    'GH_Indexer',
-    'src/GH/indexer.cpp',
+    'GH_Crawler',
+    'src/GH/new_repos_explorer/crawler.cpp',
     'src/utilities/utilities.cpp',
-    include_directories: [
-        include_directories('src/utilities'),
-    ],
+    include_directories: utilities_include_directories,
+    dependencies: platform_dependencies,
+    install: false,
+)
+
+executable(
+    'GH_Indexer',
+    'src/GH/new_repos_explorer/indexer.cpp',
+    'src/utilities/utilities.cpp',
+    include_directories: utilities_include_directories,
     dependencies: platform_dependencies + [
         sqlite3,
         sqlitecpp,
     ],
+    install: false,
+)
+
+executable(
+    'GH_Range_Gen_for_Updater',
+    'src/GH/existing_repos_updater/generate_time_ranges_for_updater.cpp',
+    common_gh_sources,
+    include_directories: [
+        gh_include_directories,
+        utilities_include_directories,
+    ],
+    dependencies: platform_dependencies,
+    install: false,
+)
+
+executable(
+    'Keyword_Extractor',
+    'src/plugins/keyword_extractor/main.cpp',
     install: false,
 )
