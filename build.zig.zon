@@ -1,0 +1,15 @@
+.{
+    .name = .zigistry,
+    .version = "0.3.0",
+    .minimum_zig_version = "0.17.0",
+    .fingerprint = 0xd9ed6ccba951e3bd,
+    .paths = .{
+        "src",
+        "example",
+        "LICENSE.txt",
+        "LICENSE-ADDITIONAL.txt",
+        "README.txt",
+        "build.zig",
+        "build.zig.zon",
+    },
+}

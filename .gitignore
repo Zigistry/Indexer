@@ -9,3 +9,5 @@ search_preparer
 build/
 libs/
 tmp/
+.zig-cache/
+zig-out/
