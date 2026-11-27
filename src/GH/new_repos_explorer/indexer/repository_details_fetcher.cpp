@@ -1,17 +1,11 @@
-#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <fstream>
 #include <httplib.h>
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <thread>
-#include <SQLiteCpp/SQLiteCpp.h>
-#include <utilities.h>
-#include <vector>
-#include "fetch_repo_fragment.hh"
 
 struct Repo {
     std::string platform;
@@ -19,20 +13,67 @@ struct Repo {
     std::string repo_name;
 };
 
-
-Repo split_repo_id_into_parts(const std::string& id)
-{
-    Repo repo;
-    std::stringstream ss(id);
-
-    std::getline(ss, repo.platform, '/');
-    std::getline(ss, repo.owner_name, '/');
-    std::getline(ss, repo.repo_name);
-
-    return repo;
+const std::string fetch_repo_gql_query_fragment = R"""(
+fragment RepoFields on Repository {
+  name
+  description
+  pushedAt
+  createdAt
+  isArchived
+  isDisabled
+  isFork
+  forkCount
+  stargazerCount
+  issues {
+    totalCount
+  }
+  watchers {
+    totalCount
+  }
+  defaultBranchRef {
+    name
+    target {
+      ... on Commit {
+        oid
+      }
+    }
+  }
+  licenseInfo {
+    spdxId
+  }
+  primaryLanguage {
+    name
+  }
+  owner {
+    login
+    ... on User {
+      bio
+    }
+    ... on Organization {
+      description
+    }
+  }
+  repositoryTopics(first: 10) {
+    nodes {
+      topic {
+        name
+      }
+    }
+  }
+  releases(first: 5, orderBy: { field: CREATED_AT, direction: DESC }) {
+    nodes {
+      tagName
+      isPrerelease
+      publishedAt
+    }
+  }
+  languages(first: 10, orderBy: { field: SIZE, direction: DESC }) {
+    nodes {
+      name
+    }
+  }
 }
-
-
+)""";
 
 nlohmann::json fetch_repository_from_github(const Repo& repo)
 {
@@ -127,42 +168,4 @@ nlohmann::json fetch_repository_from_github(const Repo& repo)
 
     std::cerr << "Skipping " << repository_id << " after 5 retries." << std::endl;
     return nlohmann::json::object();
-}
-
-int main()
-{
-    std::ifstream input_file("./tmp/github_every_repo_name_and_owner_name.txt");
-
-    SQLite::Database db("./tmp/zigistry.db", SQLite::OPEN_READWRITE);
-
-    SQLite::Statement check_repo_in_repos_query(db, "SELECT 1 FROM repos WHERE id = ? LIMIT 1");
-    SQLite::Statement check_owner_in_banned_users_query(db, "SELECT 1 FROM banned_users WHERE id = ? LIMIT 1");
-
-    std::vector<Repo> repos_to_index;
-
-    char line[500];
-
-    while (input_file.getline(line, sizeof(line))) {
-        const auto raw_repo = "gh/" + std::string(line);
-        const auto repo = split_repo_id_into_parts(raw_repo);
-
-        check_repo_in_repos_query.bind(1, raw_repo);
-        const bool repo_already_exists = check_repo_in_repos_query.executeStep();
-
-        check_owner_in_banned_users_query.bind(1, repo.owner_name);
-        const bool owner_is_banned = check_owner_in_banned_users_query.executeStep();
-
-        if (repo_already_exists || owner_is_banned) {
-            continue;
-        }
-
-        repos_to_index.push_back(repo);
-    }
-
-    #pragma omp parallel for num_threads(2)
-    for (const Repo& repo : repos_to_index) {
-        const nlohmann::json fetched_repository_json = fetch_repository_from_github(repo);
-    }
-
-    return 0;
 }
